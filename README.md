@@ -129,13 +129,54 @@ Tailored to automotive industry with focus on:
 
 ## Running the Tool
 
+### Option 1: Web Interface (Recommended)
+
+Run the interactive web application:
+
+```bash
+streamlit run app.py
+```
+
+This will open a web interface in your browser where you can:
+- Upload financial and/or sustainability reports via drag-and-drop
+- View interactive scores and breakdowns
+- Download the investor summary as a text file
+- See detailed raw indicators for debugging
+
+**Requirements:**
+- OpenAI API key in `.env` file
+- Internet connection for OpenAI API calls
+
+**Processing time:** ~2-3 minutes depending on document size and API response time.
+
+---
+
+### Option 2: Command Line Interface
+
+Run the traditional CLI version:
+
 ```bash
 python main.py
 ```
 
-**Requirements:**
-- Annual financial report PDF
-- Sustainability/Impact report PDF
-- OpenAI API key in `.env` file
+Edit the paths in `main.py` to point to your PDF files:
+```python
+FINANCIAL_PDF_PATH = "path/to/financial_report.pdf"
+SUSTAINABILITY_PDF_PATH = "path/to/sustainability_report.pdf"
+```
 
-**Processing time:** ~2-3 minutes depending on document size and API response time.
+Set either path to `None` to skip that analysis.
+
+---
+
+## Installation
+
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Create a `.env` file with your OpenAI API key:
+```
+OPENAI_API_KEY=your_api_key_here
+```
