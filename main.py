@@ -14,8 +14,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 # --------- CONFIG: PDF paths and model name ---------
 
-# Set to None to skip financial analysis
-FINANCIAL_PDF_PATH = None  # "C:/Users/nancy/OneDrive - Yale University/Documents/1. School/4. Yale MAM/3. Academics/MGT 695/CPSC-1710-Final-Project/data/TSLA_2024_Annual_Report.pdf"
+# Set to None to skip analysis
+FINANCIAL_PDF_PATH = "C:/Users/nancy/OneDrive - Yale University/Documents/1. School/4. Yale MAM/3. Academics/MGT 695/CPSC-1710-Final-Project/data/AAPL_2024_Annual_Report_Condensed.pdf"
 SUSTAINABILITY_PDF_PATH = "C:/Users/nancy/OneDrive - Yale University/Documents/1. School/4. Yale MAM/3. Academics/MGT 695/CPSC-1710-Final-Project/data/RIVN_2024_Environmental_Metrics_Report.pdf"
 
 MODEL_NAME = "gpt-4o-mini"  # option to switch to gpt-4o (more expensive)
@@ -27,19 +27,40 @@ if "OPENAI_API_KEY" not in os.environ:
 
 # --------- DATA CLASSES ---------
 
-# All the financial boolean indicators plus a short evidence string for each.
+# Financial indicators with numeric scoring (0, 1, 2, or null)
 @dataclass
 class FinancialIndicators:
-    revenue_growth_positive: bool
+    # 1) Revenue Growth
+    revenue_growth_score: int | None  # 0, 1, 2, or None
     revenue_growth_evidence: str
-    margin_stable_or_improving: bool
-    margin_evidence: str
-    fcf_positive_or_operating_cf_positive: bool
+
+    # 2) Gross Margin
+    gross_margin_score: int | None
+    gross_margin_evidence: str
+
+    # 3) Operating Margin
+    operating_margin_score: int | None
+    operating_margin_evidence: str
+
+    # 4) EBITDA Margin
+    ebitda_margin_score: int | None
+    ebitda_margin_evidence: str
+
+    # 5) Free Cash Flow
+    fcf_score: int | None
     fcf_evidence: str
-    leverage_not_rising: bool
-    leverage_evidence: str
-    specific_forward_guidance: bool
-    guidance_evidence: str
+
+    # 6) CapEx as % of Revenue
+    capex_score: int | None
+    capex_evidence: str
+
+    # 7) R&D as % of Revenue
+    rnd_score: int | None
+    rnd_evidence: str
+
+    # 8) Inventory & Days Inventory Outstanding
+    inventory_score: int | None
+    inventory_evidence: str
 
 
 # Sustainability/ESG indicators specifically for automotive manufacturers
@@ -130,50 +151,118 @@ def get_llm() -> ChatOpenAI:
 
 def extract_financial_indicators(llm: ChatOpenAI, vs: FAISS) -> FinancialIndicators:
     question = (
-        "Information about revenue growth, margins, cash flow, leverage/net debt "
-        "and forward-looking guidance with numbers or dates."
+        "Information about revenue growth, gross margin, operating margin, EBITDA margin, "
+        "free cash flow, capital expenditures, R&D spending, inventory, and days inventory outstanding"
     )
 
-    context = retrieve_context(question, vs, k=8)
+    context = retrieve_context(question, vs, k=10)
 
     prompt = ChatPromptTemplate.from_template(
         """
-You are an analyst reading a company's financial report.
+You are a financial analyst reading a company's annual report.
 
 CONTEXT:
 {context}
 
-Return a STRICT JSON object with exactly these keys and types:
+For each indicator below, you will:
+1) Determine the underlying facts from the CONTEXT
+2) Assign a numeric score (0, 1, or 2) using the rules below
+3) Provide brief evidence referencing specific numbers from the CONTEXT
 
-- revenue_growth_positive: true or false
-- revenue_growth_evidence: string
-- margin_stable_or_improving: true or false
-- margin_evidence: string
-- fcf_positive_or_operating_cf_positive: true or false
-- fcf_evidence: string
-- leverage_not_rising: true or false
-- leverage_evidence: string
-- specific_forward_guidance: true or false
-- guidance_evidence: string
+If required information is not stated or cannot be reliably inferred, set the score to null.
 
-The output MUST be valid JSON, with double-quoted keys and values where appropriate, for example:
+**1) YoY Revenue Growth (revenue_growth_score)**
+Determine if revenue increased compared to prior period.
+
+Scoring:
+- 2: Revenue increased >5% year-over-year
+- 1: Revenue increased 0-5% year-over-year
+- 0: Revenue declined year-over-year or flat/negative
+- null: Not enough information to determine YoY change
+
+**2) Gross Margin (gross_margin_score)**
+Focus on overall or automotive gross margin. Check if positive (>0%) and if improved YoY.
+
+Scoring:
+- 2: Gross margin is positive AND clearly higher than previous year
+- 1: Gross margin is positive but NOT clearly higher (flat, lower, or no YoY info)
+- 0: Gross margin is negative
+- null: Cannot determine gross margin level
+
+**3) Operating Margin (operating_margin_score)**
+Use operating margin or EBIT margin. Check if positive and improved YoY.
+
+Scoring:
+- 2: Operating margin is positive AND clearly higher than previous year
+- 1: Operating margin is positive but NOT clearly higher
+- 0: Operating margin is negative
+- null: Cannot determine operating margin
+
+**4) EBITDA Margin (ebitda_margin_score)**
+Check if EBITDA margin is positive and improved YoY.
+
+Scoring:
+- 2: EBITDA margin is positive AND clearly higher than previous year
+- 1: EBITDA margin is positive but NOT clearly higher
+- 0: EBITDA margin is negative
+- null: Cannot determine EBITDA margin
+
+**5) Free Cash Flow (fcf_score)**
+Use free cash flow (FCF) as defined in report.
+
+Scoring:
+- 2: FCF is clearly positive
+- 1: FCF is around break-even (0 to -5% of revenue, or described as approximately breakeven)
+- 0: FCF is clearly negative and worse than -5% of revenue
+- null: Not enough information to determine FCF
+
+**6) CapEx as % of Revenue (capex_score)**
+Use capital expenditures or PP&E purchases. Estimate % if both CapEx and revenue given.
+
+Scoring:
+- 2: CapEx is 3-8% of revenue (healthy range)
+- 1: CapEx is 8-12% of revenue (aggressive but acceptable)
+- 0: CapEx is <3% (under-investing) OR >12% (very heavy spending)
+- null: Cannot estimate CapEx as % of revenue
+
+**7) R&D as % of Revenue (rnd_score)**
+Use R&D expense divided by revenue.
+
+Scoring:
+- 2: R&D is 4-10% of revenue
+- 1: R&D is 2-4% of revenue (minimal but acceptable)
+- 0: R&D is <2% (under-investing) OR >10% (very high)
+- null: Cannot estimate R&D as % of revenue
+
+**8) Inventory & Days Inventory Outstanding (inventory_score)**
+Use DIO if provided, or qualitative commentary on inventory trends.
+
+Scoring:
+- 2: DIO <40 days OR inventory described as lean/tightly managed
+- 1: DIO 40-70 days OR inventory described as normal/acceptable
+- 0: DIO >70 days OR inventory clearly elevated/excess
+- null: No DIO or meaningful inventory information
+
+Return a STRICT JSON object with these exact keys:
 
 {{
-  "revenue_growth_positive": true,
-  "revenue_growth_evidence": "...",
-  ...
+  "revenue_growth_score": 0 or 1 or 2 or null,
+  "revenue_growth_evidence": "string with specific numbers/percentages",
+  "gross_margin_score": 0 or 1 or 2 or null,
+  "gross_margin_evidence": "string",
+  "operating_margin_score": 0 or 1 or 2 or null,
+  "operating_margin_evidence": "string",
+  "ebitda_margin_score": 0 or 1 or 2 or null,
+  "ebitda_margin_evidence": "string",
+  "fcf_score": 0 or 1 or 2 or null,
+  "fcf_evidence": "string",
+  "capex_score": 0 or 1 or 2 or null,
+  "capex_evidence": "string",
+  "rnd_score": 0 or 1 or 2 or null,
+  "rnd_evidence": "string",
+  "inventory_score": 0 or 1 or 2 or null,
+  "inventory_evidence": "string"
 }}
-
-Definitions:
-- revenue_growth_positive: revenue increased year-on-year.
-- margin_stable_or_improving: operating/profit margins are stable or increasing.
-- fcf_positive_or_operating_cf_positive: free cash flow is positive OR, if not given,
-  operating cash flow is positive.
-- leverage_not_rising: net debt or leverage is stable or decreasing.
-- specific_forward_guidance: numeric or dated guidance is provided (e.g. percentages,
-  revenue ranges, EPS targets, or specific years).
-
-If unclear, answer false and explain the ambiguity in the evidence string.
 
 ONLY output the JSON object, no extra text.
         """
@@ -184,16 +273,22 @@ ONLY output the JSON object, no extra text.
     data: Dict[str, Any] = json.loads(resp.content)
 
     return FinancialIndicators(
-        revenue_growth_positive=data["revenue_growth_positive"],
+        revenue_growth_score=data["revenue_growth_score"],
         revenue_growth_evidence=data["revenue_growth_evidence"],
-        margin_stable_or_improving=data["margin_stable_or_improving"],
-        margin_evidence=data["margin_evidence"],
-        fcf_positive_or_operating_cf_positive=data["fcf_positive_or_operating_cf_positive"],
+        gross_margin_score=data["gross_margin_score"],
+        gross_margin_evidence=data["gross_margin_evidence"],
+        operating_margin_score=data["operating_margin_score"],
+        operating_margin_evidence=data["operating_margin_evidence"],
+        ebitda_margin_score=data["ebitda_margin_score"],
+        ebitda_margin_evidence=data["ebitda_margin_evidence"],
+        fcf_score=data["fcf_score"],
         fcf_evidence=data["fcf_evidence"],
-        leverage_not_rising=data["leverage_not_rising"],
-        leverage_evidence=data["leverage_evidence"],
-        specific_forward_guidance=data["specific_forward_guidance"],
-        guidance_evidence=data["guidance_evidence"],
+        capex_score=data["capex_score"],
+        capex_evidence=data["capex_evidence"],
+        rnd_score=data["rnd_score"],
+        rnd_evidence=data["rnd_evidence"],
+        inventory_score=data["inventory_score"],
+        inventory_evidence=data["inventory_evidence"],
     )
 
 
@@ -323,18 +418,32 @@ ONLY output the JSON object, no extra text.
 # --------- SCORING ---------
 
 def compute_financial_score(fi: FinancialIndicators) -> int:
+    """
+    Sum all financial indicator scores.
+    Each indicator can score 0, 1, or 2 points (or None).
+    Maximum possible: 16 points (8 indicators × 2 points each)
+    """
     score = 0
-    if fi.revenue_growth_positive:
-        score += 1
-    if fi.margin_stable_or_improving:
-        score += 1
-    if fi.fcf_positive_or_operating_cf_positive:
-        score += 1
-    if fi.leverage_not_rising:
-        score += 1
-    if fi.specific_forward_guidance:
-        score += 1
-    return score
+
+    # Sum up all non-None scores
+    if fi.revenue_growth_score is not None:
+        score += fi.revenue_growth_score
+    if fi.gross_margin_score is not None:
+        score += fi.gross_margin_score
+    if fi.operating_margin_score is not None:
+        score += fi.operating_margin_score
+    if fi.ebitda_margin_score is not None:
+        score += fi.ebitda_margin_score
+    if fi.fcf_score is not None:
+        score += fi.fcf_score
+    if fi.capex_score is not None:
+        score += fi.capex_score
+    if fi.rnd_score is not None:
+        score += fi.rnd_score
+    if fi.inventory_score is not None:
+        score += fi.inventory_score
+
+    return score  # Out of 16 total
 
 
 def compute_sustainability_score(si: SustainabilityIndicators) -> int:
@@ -400,15 +509,23 @@ def generate_summary(
     fi: FinancialIndicators,
     si: SustainabilityIndicators,
 ) -> str:
+    """
+    Generate a comprehensive 1-page investor summary with:
+    - Executive overview
+    - Financial analysis with bullet points and supporting evidence
+    - Sustainability analysis with bullet points and supporting evidence
+    - Pros and Cons
+    - Risk factors
+    """
 
     # Normalize scores for comparison (both on 0-10 scale)
-    f_score_normalized = (f_score / 5) * 10
+    f_score_normalized = (f_score / 16) * 10  # Financial max is now 16
     s_score_normalized = (s_score / 15) * 10
     overall = (f_score_normalized + s_score_normalized) / 2
 
     payload = {
         "financial_score": f_score,
-        "financial_score_out_of": 5,
+        "financial_score_out_of": 16,
         "financial_score_normalized": f_score_normalized,
         "sustainability_score": s_score,
         "sustainability_score_out_of": 15,
@@ -420,27 +537,61 @@ def generate_summary(
 
     prompt = ChatPromptTemplate.from_template(
         """
-You are writing a concise investor note for an AUTOMOTIVE company.
+You are writing a comprehensive 1-page investor report for an AUTOMOTIVE company.
 
 Here are structured scores and evidence:
 {payload_json}
 
-Write:
-1) A 2–4 sentence overview of the automaker's financial and sustainability health.
-2) 3–5 bullet points highlighting:
-   - Financial strengths/risks
-   - GHG emissions transparency
-   - EV transition progress
-   - Greenwashing red flags (if any)
-   - Environmental compliance
-3) A conclusion sentence about the company's readiness for the automotive transition.
+Generate a well-structured report with the following sections:
 
-Keep everything under 300 words.
+## EXECUTIVE OVERVIEW
+2-3 sentences summarizing the company's overall financial health (score: {f_score}/16) and sustainability performance (score: {s_score}/15).
+
+## FINANCIAL ANALYSIS (Score: {f_score}/16, Normalized: {f_norm:.1f}/10)
+Provide 4-6 bullet points analyzing:
+- Revenue growth trends with specific percentages/figures from evidence
+- Profitability metrics (gross, operating, EBITDA margins) with YoY changes
+- Cash flow position and capital allocation (FCF, CapEx, R&D as % of revenue)
+- Operational efficiency (inventory management)
+
+For each bullet point, include supporting snippets from the evidence fields (actual numbers, percentages, or quotes).
+
+## SUSTAINABILITY ANALYSIS (Score: {s_score}/15, Normalized: {s_norm:.1f}/10)
+Provide 4-6 bullet points analyzing:
+- GHG emissions reporting (Scope 1/2/3 coverage and YoY trends)
+- EV transition strategy (production targets, ICE phase-out, battery recycling)
+- Transparency and greenwashing assessment (specificity of claims, third-party verification)
+- Environmental compliance (water, waste, fines, supplier audits)
+
+For each bullet point, include supporting snippets from the evidence fields (actual emissions data, target dates, certifications).
+
+## STRENGTHS
+List 3-4 key competitive advantages or positive indicators based on the data.
+
+## WEAKNESSES
+List 3-4 areas of concern, gaps in disclosure, or negative trends.
+
+## RISK FACTORS
+Identify 3-4 material risks based on the financial and sustainability analysis:
+- Financial risks (cash burn, margin pressure, inventory issues, etc.)
+- Transition risks (EV adoption delays, regulatory changes, etc.)
+- ESG risks (emissions trajectory, greenwashing exposure, compliance issues, etc.)
+
+## INVESTMENT RECOMMENDATION
+1-2 sentences with overall assessment and readiness for automotive industry transition.
+
+Keep the entire report under 600 words. Use clear, professional language. Quote specific numbers from evidence fields.
         """
     )
 
     chain = prompt | llm
-    resp = chain.invoke({"payload_json": json.dumps(payload, indent=2)})
+    resp = chain.invoke({
+        "payload_json": json.dumps(payload, indent=2),
+        "f_score": f_score,
+        "s_score": s_score,
+        "f_norm": f_score_normalized,
+        "s_norm": s_score_normalized
+    })
     return resp.content.strip()
 
 
@@ -458,29 +609,35 @@ def main():
         print("\nExtracting financial indicators...")
         fi = extract_financial_indicators(llm, financial_vs)
         f_score = compute_financial_score(fi)
-        f_score_normalized = (f_score / 5) * 10
+        f_score_normalized = (f_score / 16) * 10
     else:
         print("\n[Skipping financial analysis - no financial report provided]")
 
-    # 2) Build vector store for sustainability report
-    sustainability_vs = build_vectorstore_from_pdf(SUSTAINABILITY_PDF_PATH)
+    # 2) Build vector store for sustainability report (if provided)
+    si = None
+    s_score = 0
+    s_score_normalized = 0
 
-    # 3) Create LLM client
-    llm = get_llm()
-
-    # 4) Extract sustainability indicators
-    print("\nExtracting sustainability indicators...")
-    si = extract_sustainability_indicators(llm, sustainability_vs)
-
-    # 5) Compute scores
-    s_score = compute_sustainability_score(si)
-    s_score_normalized = (s_score / 15) * 10
+    if SUSTAINABILITY_PDF_PATH:
+        sustainability_vs = build_vectorstore_from_pdf(SUSTAINABILITY_PDF_PATH)
+        llm = get_llm()
+        print("\nExtracting sustainability indicators...")
+        si = extract_sustainability_indicators(llm, sustainability_vs)
+        s_score = compute_sustainability_score(si)
+        s_score_normalized = (s_score / 15) * 10
+    else:
+        print("\n[Skipping sustainability analysis - no sustainability report provided]")
 
     # Calculate overall score
-    if FINANCIAL_PDF_PATH:
+    if FINANCIAL_PDF_PATH and SUSTAINABILITY_PDF_PATH:
         overall = (f_score_normalized + s_score_normalized) / 2
-    else:
+    elif FINANCIAL_PDF_PATH:
+        overall = f_score_normalized
+    elif SUSTAINABILITY_PDF_PATH:
         overall = s_score_normalized
+    else:
+        overall = 0
+        print("\n[ERROR: No reports provided for analysis]")
 
     # 6) Print raw indicators (debug)
     print("\n--- RAW INDICATORS ---")
@@ -488,27 +645,42 @@ def main():
         print("FINANCIAL:")
         print(fi)
         print("\n")
-    print("SUSTAINABILITY:")
-    print(si)
+    if si:
+        print("SUSTAINABILITY:")
+        print(si)
 
     # 7) Print scores
     print("\n--- SCORES ---")
-    if FINANCIAL_PDF_PATH:
-        print(f"Financial score: {f_score} / 5 (normalized: {f_score_normalized:.1f} / 10)")
-    print(f"Sustainability score: {s_score} / 15 (normalized: {s_score_normalized:.1f} / 10)")
-    print(f"  - GHG Emissions: {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4")
-    print(f"  - Automotive Targets: {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4")
-    print(f"  - Transparency: {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3")
-    print(f"  - Environmental/Compliance: {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4")
-    print(f"Overall score: {overall:.1f} / 10")
+    if FINANCIAL_PDF_PATH and fi:
+        print(f"Financial score: {f_score} / 16 (normalized: {f_score_normalized:.1f} / 10)")
+        print(f"  - Revenue Growth: {fi.revenue_growth_score if fi.revenue_growth_score is not None else 'N/A'} / 2")
+        print(f"  - Gross Margin: {fi.gross_margin_score if fi.gross_margin_score is not None else 'N/A'} / 2")
+        print(f"  - Operating Margin: {fi.operating_margin_score if fi.operating_margin_score is not None else 'N/A'} / 2")
+        print(f"  - EBITDA Margin: {fi.ebitda_margin_score if fi.ebitda_margin_score is not None else 'N/A'} / 2")
+        print(f"  - Free Cash Flow: {fi.fcf_score if fi.fcf_score is not None else 'N/A'} / 2")
+        print(f"  - CapEx % of Revenue: {fi.capex_score if fi.capex_score is not None else 'N/A'} / 2")
+        print(f"  - R&D % of Revenue: {fi.rnd_score if fi.rnd_score is not None else 'N/A'} / 2")
+        print(f"  - Inventory/DIO: {fi.inventory_score if fi.inventory_score is not None else 'N/A'} / 2")
+    if SUSTAINABILITY_PDF_PATH and si:
+        print(f"Sustainability score: {s_score} / 15 (normalized: {s_score_normalized:.1f} / 10)")
+        print(f"  - GHG Emissions: {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4")
+        print(f"  - Automotive Targets: {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4")
+        print(f"  - Transparency: {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3")
+        print(f"  - Environmental/Compliance: {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4")
 
-    # 8) Generate summary (only if financial data provided)
-    if FINANCIAL_PDF_PATH:
+    if FINANCIAL_PDF_PATH or SUSTAINABILITY_PDF_PATH:
+        print(f"Overall score: {overall:.1f} / 10")
+
+    # 8) Generate summary (only if both financial and sustainability data provided)
+    if FINANCIAL_PDF_PATH and SUSTAINABILITY_PDF_PATH:
+        llm = get_llm()
         print("\nGenerating investor summary...")
         summary = generate_summary(llm, f_score, s_score, fi, si)
         print("\n=== INVESTOR SUMMARY ===")
         print(summary)
-    else:
+    elif FINANCIAL_PDF_PATH:
+        print("\n[Financial-only analysis complete. Add sustainability report for full investor summary.]")
+    elif SUSTAINABILITY_PDF_PATH:
         print("\n[Sustainability-only analysis complete. Add financial report for full investor summary.]")
 
 
