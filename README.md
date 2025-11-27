@@ -15,42 +15,70 @@ This tool has been customized to assess **automotive manufacturers** specificall
 - 1: Revenue increased 0-5% year-over-year
 - 0: Revenue declined or flat
 
+**Why this matters:** Strong revenue growth indicates market share gains and successful product adoption, particularly important as automakers transition from ICE to EV platforms.
+
+---
+
 #### 2. Gross Margin (2 points)
 - 2: Gross margin is positive AND improved year-over-year
 - 1: Gross margin is positive but flat or declined
 - 0: Gross margin is negative
+
+**Why this matters:** Improving gross margins demonstrate pricing power and manufacturing efficiency, critical as EV production scales and battery costs decline.
+
+---
 
 #### 3. Operating Margin (2 points)
 - 2: Operating margin is positive AND improved year-over-year
 - 1: Operating margin is positive but flat or declined
 - 0: Operating margin is negative
 
+**Why this matters:** Operating margin improvement shows effective cost management during the capital-intensive EV transition period.
+
+---
+
 #### 4. EBITDA Margin (2 points)
 - 2: EBITDA margin is positive AND improved year-over-year
 - 1: EBITDA margin is positive but flat or declined
 - 0: EBITDA margin is negative
+
+**Why this matters:** EBITDA margin reveals core operational profitability before accounting for heavy depreciation from manufacturing investments.
+
+---
 
 #### 5. Free Cash Flow (2 points)
 - 2: FCF is clearly positive
 - 1: FCF is around break-even (0 to -5% of revenue)
 - 0: FCF is clearly negative (worse than -5% of revenue)
 
+**Why this matters:** Positive FCF demonstrates the company's ability to self-fund EV development and expansion without excessive capital raises.
+
+---
+
 #### 6. CapEx as % of Revenue (2 points)
 - 2: CapEx is 3-8% of revenue (healthy range)
 - 1: CapEx is 8-12% of revenue (aggressive but acceptable)
 - 0: CapEx is <3% (under-investing) OR >12% (very heavy spending)
+
+**Why this matters:** Balanced CapEx spending indicates sustainable investment in EV production capacity and battery technology without over-leveraging.
+
+---
 
 #### 7. R&D as % of Revenue (2 points)
 - 2: R&D is 4-10% of revenue
 - 1: R&D is 2-4% of revenue (minimal but acceptable)
 - 0: R&D is <2% (under-investing) OR >10% (very high)
 
+**Why this matters:** Adequate R&D investment ensures competitiveness in battery technology, autonomous driving, and next-generation EV platforms.
+
+---
+
 #### 8. Inventory & Days Inventory Outstanding (2 points)
 - 2: DIO <40 days OR inventory lean/tightly managed
 - 1: DIO 40-70 days OR inventory normal/acceptable
 - 0: DIO >70 days OR inventory clearly elevated/excess
 
-**Why this matters:** These granular financial metrics provide a comprehensive view of profitability, cash generation, capital allocation, and operational efficiency—critical factors for automotive companies navigating the EV transition.
+**Why this matters:** Low DIO indicates efficient inventory management and reduced risk of obsolescence as the industry rapidly shifts from ICE to EV vehicles.
 
 ### Sustainability Indicators (15 points → normalized to 10)
 

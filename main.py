@@ -105,7 +105,7 @@ class SustainabilityIndicators:
     audit_evidence: str
 
 
-# --------- RAG HELPERS ---------
+# --------- RAG HELPERS (used for sustainability only) ---------
 
 def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     """Load a PDF, chunk it, embed the chunks, and store in FAISS."""
@@ -149,13 +149,11 @@ def get_llm() -> ChatOpenAI:
 
 # --------- EXTRACTION FUNCTIONS ---------
 
-def extract_financial_indicators(llm: ChatOpenAI, vs: FAISS) -> FinancialIndicators:
-    question = (
-        "Information about revenue growth, gross margin, operating margin, EBITDA margin, "
-        "free cash flow, capital expenditures, R&D spending, inventory, and days inventory outstanding"
-    )
-
-    context = retrieve_context(question, vs, k=10)
+def extract_financial_indicators(llm: ChatOpenAI, context: str) -> FinancialIndicators:
+    """
+    Extract financial indicators from FULL financial report text (non-RAG).
+    The context should be the concatenated text of the financial PDF.
+    """
 
     prompt = ChatPromptTemplate.from_template(
         """
@@ -181,31 +179,37 @@ Scoring:
 - null: Not enough information to determine YoY change
 
 **2) Gross Margin (gross_margin_score)**
-Focus on overall or automotive gross margin. Check if positive (>0%) and if improved YoY.
+Calculate gross margin % = (Gross Profit / Revenue) × 100.
+If not explicitly stated, calculate from: Gross Profit = Revenue - Cost of Goods Sold (COGS) or Cost of Revenue.
+Compare YoY to determine if improved.
 
 Scoring:
-- 2: Gross margin is positive AND clearly higher than previous year
-- 1: Gross margin is positive but NOT clearly higher (flat, lower, or no YoY info)
-- 0: Gross margin is negative
-- null: Cannot determine gross margin level
+- 2: Gross margin % is positive AND clearly higher than previous year
+- 1: Gross margin % is positive but NOT clearly higher (flat, lower, or no YoY info)
+- 0: Gross margin % is negative
+- null: Cannot calculate gross margin (missing revenue or gross profit/COGS data)
 
 **3) Operating Margin (operating_margin_score)**
-Use operating margin or EBIT margin. Check if positive and improved YoY.
+Calculate operating margin % = (Operating Income / Revenue) × 100.
+If not explicitly stated, calculate from: Operating Income = Gross Profit - Operating Expenses, or use EBIT.
+Compare YoY to determine if improved.
 
 Scoring:
-- 2: Operating margin is positive AND clearly higher than previous year
-- 1: Operating margin is positive but NOT clearly higher
-- 0: Operating margin is negative
-- null: Cannot determine operating margin
+- 2: Operating margin % is positive AND clearly higher than previous year
+- 1: Operating margin % is positive but NOT clearly higher
+- 0: Operating margin % is negative
+- null: Cannot calculate operating margin (missing required data)
 
 **4) EBITDA Margin (ebitda_margin_score)**
-Check if EBITDA margin is positive and improved YoY.
+Calculate EBITDA margin % = (EBITDA / Revenue) × 100.
+If not explicitly stated, calculate from: EBITDA = Operating Income + Depreciation + Amortization.
+Compare YoY to determine if improved.
 
 Scoring:
-- 2: EBITDA margin is positive AND clearly higher than previous year
-- 1: EBITDA margin is positive but NOT clearly higher
-- 0: EBITDA margin is negative
-- null: Cannot determine EBITDA margin
+- 2: EBITDA margin % is positive AND clearly higher than previous year
+- 1: EBITDA margin % is positive but NOT clearly higher
+- 0: EBITDA margin % is negative
+- null: Cannot calculate EBITDA margin (missing required data)
 
 **5) Free Cash Flow (fcf_score)**
 Use free cash flow (FCF) as defined in report.
@@ -217,31 +221,38 @@ Scoring:
 - null: Not enough information to determine FCF
 
 **6) CapEx as % of Revenue (capex_score)**
-Use capital expenditures or PP&E purchases. Estimate % if both CapEx and revenue given.
+Calculate CapEx % = (Capital Expenditures / Revenue) × 100.
+Look for "Capital expenditures", "Additions to property, plant and equipment", or "PP&E purchases" in cash flow statement.
+If not explicitly stated as %, you MUST calculate it using the formula above.
 
 Scoring:
 - 2: CapEx is 3-8% of revenue (healthy range)
 - 1: CapEx is 8-12% of revenue (aggressive but acceptable)
 - 0: CapEx is <3% (under-investing) OR >12% (very heavy spending)
-- null: Cannot estimate CapEx as % of revenue
+- null: Cannot calculate CapEx % (missing CapEx or revenue data)
 
 **7) R&D as % of Revenue (rnd_score)**
-Use R&D expense divided by revenue.
+Calculate R&D % = (R&D Expense / Revenue) × 100.
+Look for "Research and development" expense in income statement or operating expenses section.
+If not explicitly stated as %, you MUST calculate it using the formula above.
 
 Scoring:
 - 2: R&D is 4-10% of revenue
 - 1: R&D is 2-4% of revenue (minimal but acceptable)
 - 0: R&D is <2% (under-investing) OR >10% (very high)
-- null: Cannot estimate R&D as % of revenue
+- null: Cannot calculate R&D % (missing R&D expense or revenue data)
 
 **8) Inventory & Days Inventory Outstanding (inventory_score)**
-Use DIO if provided, or qualitative commentary on inventory trends.
+Calculate DIO = (Average Inventory / Cost of Sales) × 365 days.
+If not explicitly stated, calculate from: Average Inventory = (Beginning Inventory + Ending Inventory) / 2.
+Look for inventory on balance sheet and Cost of Sales (or COGS) on income statement.
+If DIO cannot be calculated, use qualitative commentary on inventory trends.
 
 Scoring:
 - 2: DIO <40 days OR inventory described as lean/tightly managed
 - 1: DIO 40-70 days OR inventory described as normal/acceptable
 - 0: DIO >70 days OR inventory clearly elevated/excess
-- null: No DIO or meaningful inventory information
+- null: Cannot calculate DIO and no meaningful inventory information available
 
 Return a STRICT JSON object with these exact keys:
 
@@ -249,20 +260,26 @@ Return a STRICT JSON object with these exact keys:
   "revenue_growth_score": 0 or 1 or 2 or null,
   "revenue_growth_evidence": "string with specific numbers/percentages",
   "gross_margin_score": 0 or 1 or 2 or null,
-  "gross_margin_evidence": "string",
+  "gross_margin_evidence": "string (MUST include calculated % if you computed it, e.g., 'Gross margin: 38.2% in 2024 vs 36.5% in 2023')",
   "operating_margin_score": 0 or 1 or 2 or null,
-  "operating_margin_evidence": "string",
+  "operating_margin_evidence": "string (MUST include calculated % if you computed it)",
   "ebitda_margin_score": 0 or 1 or 2 or null,
-  "ebitda_margin_evidence": "string",
+  "ebitda_margin_evidence": "string (MUST include calculated % if you computed it)",
   "fcf_score": 0 or 1 or 2 or null,
   "fcf_evidence": "string",
   "capex_score": 0 or 1 or 2 or null,
-  "capex_evidence": "string",
+  "capex_evidence": "string (MUST include calculated CapEx % of revenue, e.g., 'CapEx $10.5B / Revenue $150B = 7.0%')",
   "rnd_score": 0 or 1 or 2 or null,
-  "rnd_evidence": "string",
+  "rnd_evidence": "string (MUST include calculated R&D % of revenue, e.g., 'R&D $8.2B / Revenue $150B = 5.5%')",
   "inventory_score": 0 or 1 or 2 or null,
-  "inventory_evidence": "string"
+  "inventory_evidence": "string (MUST include calculated DIO if you computed it, e.g., 'DIO = ($5.2B avg inventory / $95B COGS) × 365 = 20 days')"
 }}
+
+IMPORTANT: For gross_margin_evidence, operating_margin_evidence, ebitda_margin_evidence, capex_evidence, rnd_evidence, and inventory_evidence:
+- You MUST show your calculation if the percentage/metric was not explicitly stated
+- Include the actual percentage value (e.g., "38.2%") or DIO value (e.g., "20 days") in the evidence
+- Show both current year and prior year percentages for margin metrics
+- For DIO, show the calculation: (Avg Inventory / COGS) × 365
 
 ONLY output the JSON object, no extra text.
         """
@@ -598,22 +615,27 @@ Keep the entire report under 600 words. Use clear, professional language. Quote 
 # --------- MAIN ---------
 
 def main():
-    # 1) Build vector store for financial report (if provided)
+    # 1) Financial analysis (NON-RAG: full document context)
     fi = None
     f_score = 0
     f_score_normalized = 0
 
     if FINANCIAL_PDF_PATH:
-        financial_vs = build_vectorstore_from_pdf(FINANCIAL_PDF_PATH)
         llm = get_llm()
+        print("\nLoading financial report (non-RAG)...")
+        loader = PyPDFLoader(FINANCIAL_PDF_PATH)
+        financial_docs = loader.load()
+        # Concatenate all pages into one context string
+        financial_context = "\n\n".join(d.page_content for d in financial_docs)
+
         print("\nExtracting financial indicators...")
-        fi = extract_financial_indicators(llm, financial_vs)
+        fi = extract_financial_indicators(llm, financial_context)
         f_score = compute_financial_score(fi)
         f_score_normalized = (f_score / 16) * 10
     else:
         print("\n[Skipping financial analysis - no financial report provided]")
 
-    # 2) Build vector store for sustainability report (if provided)
+    # 2) Sustainability analysis (RAG: vector store + retrieval)
     si = None
     s_score = 0
     s_score_normalized = 0
@@ -672,15 +694,15 @@ def main():
         print(f"Overall score: {overall:.1f} / 10")
 
     # 8) Generate summary (only if both financial and sustainability data provided)
-    if FINANCIAL_PDF_PATH and SUSTAINABILITY_PDF_PATH:
+    if FINANCIAL_PDF_PATH and SUSTAINABILITY_PDF_PATH and fi and si:
         llm = get_llm()
         print("\nGenerating investor summary...")
         summary = generate_summary(llm, f_score, s_score, fi, si)
         print("\n=== INVESTOR SUMMARY ===")
         print(summary)
-    elif FINANCIAL_PDF_PATH:
+    elif FINANCIAL_PDF_PATH and fi:
         print("\n[Financial-only analysis complete. Add sustainability report for full investor summary.]")
-    elif SUSTAINABILITY_PDF_PATH:
+    elif SUSTAINABILITY_PDF_PATH and si:
         print("\n[Sustainability-only analysis complete. Add financial report for full investor summary.]")
 
 
