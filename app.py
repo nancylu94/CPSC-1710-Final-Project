@@ -441,6 +441,130 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
     return score
 
 
+# --------- DISCLOSURE QUALITY MATRIX HELPERS ---------
+
+def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
+    """
+    Compute completeness and reliability levels for the Option 1 matrix.
+
+    Completeness of disclosure:
+        - Based on whether key sustainability metrics are reported.
+    Reliability of claims:
+        - Based on greenwashing-related indicators.
+    """
+    # Key metrics that represent basic disclosure completeness
+    completeness_flags = [
+        si.ghg_scope1_reported,
+        si.ghg_scope2_reported,
+        si.ghg_scope3_reported,
+        si.ghg_yoy_change_reported,
+        si.ev_production_targets,
+        si.battery_recycling_reported,
+        si.ice_phaseout_date_specified,
+        si.supply_chain_traceability,
+        si.water_usage_reported,
+        si.hazardous_waste_reported,
+        si.regulatory_fines_disclosed,
+        si.supplier_audit_frequency,
+    ]
+
+    completeness_ratio = sum(completeness_flags) / len(completeness_flags) if completeness_flags else 0.0
+
+    # Claim-quality / anti-greenwashing checks
+    reliability_flags = [
+        si.claims_have_specificity,
+        si.claims_have_supporting_evidence,
+        si.avoids_excessive_self_praise,
+    ]
+    reliability_ratio = sum(reliability_flags) / len(reliability_flags) if reliability_flags else 0.0
+
+    def to_level(r: float) -> str:
+        if r >= 0.75:
+            return "High"
+        elif r >= 0.4:
+            return "Medium"
+        else:
+            return "Low"
+
+    return {
+        "completeness_ratio": completeness_ratio,
+        "reliability_ratio": reliability_ratio,
+        "completeness_level": to_level(completeness_ratio),
+        "reliability_level": to_level(reliability_ratio),
+    }
+
+
+def render_disclosure_matrix(quality: Dict[str, Any]):
+    """
+    Render a 3×3 coloured matrix (Option 1) in Streamlit using HTML.
+
+    X-axis: Completeness of Disclosure (Low → High)
+    Y-axis: Reliability of Claims (Low → High)
+    Cell text = approximate risk level; current company cell is marked with ⬤.
+    """
+    completeness_level = quality["completeness_level"]
+    reliability_level = quality["reliability_level"]
+    completeness_ratio = quality["completeness_ratio"]
+    reliability_ratio = quality["reliability_ratio"]
+
+    # Define risk level and colours for each combination
+    # (row = reliability, col = completeness)
+    levels = ["Low", "Medium", "High"]
+
+    # risk labels roughly following a risk-matrix style
+    risk_map = {
+        ("Low", "Low"): ("High", "#d73027"),
+        ("Low", "Medium"): ("High", "#d73027"),
+        ("Low", "High"): ("Med-High", "#f46d43"),
+        ("Medium", "Low"): ("High", "#d73027"),
+        ("Medium", "Medium"): ("Medium", "#fdae61"),
+        ("Medium", "High"): ("Medium", "#fdae61"),
+        ("High", "Low"): ("Med-High", "#f46d43"),
+        ("High", "Medium"): ("Medium", "#fdae61"),
+        ("High", "High"): ("Low", "#66bd63"),
+    }
+
+    # Build table rows
+    rows_html = ""
+    # Show High reliability at top down to Low (like heatmaps with likelihood axis)
+    for rel in reversed(levels):
+        row_cells = f'<td style="font-weight:600;padding:6px 10px;white-space:nowrap;">{rel} reliability</td>'
+        for comp in levels:
+            risk_label, bg_color = risk_map[(rel, comp)]
+            is_company_cell = (rel == reliability_level and comp == completeness_level)
+            border = "2px solid #000" if is_company_cell else "1px solid #dddddd"
+            marker = "⬤ " if is_company_cell else ""
+            row_cells += (
+                f'<td style="border:{border};background-color:{bg_color};'
+                f'padding:6px 10px;text-align:center;color:#ffffff;font-weight:600;">'
+                f'{marker}{risk_label}</td>'
+            )
+        rows_html += f"<tr>{row_cells}</tr>"
+
+    table_html = f"""
+    <div style="margin-top:0.75rem;">
+      <p><strong>Disclosure Quality Matrix</strong></p>
+      <p style="font-size:0.9rem;margin-bottom:0.5rem;">
+        Completeness of disclosure: <strong>{completeness_level}</strong> ({completeness_ratio*100:.0f}% of key metrics reported)<br>
+        Reliability of claims: <strong>{reliability_level}</strong> ({reliability_ratio*100:.0f}% of claim-quality checks passed)
+      </p>
+      <table style="border-collapse:collapse;">
+        <tr>
+          <th style="border:none;"></th>
+          <th style="padding:6px 10px;">Low completeness</th>
+          <th style="padding:6px 10px;">Medium completeness</th>
+          <th style="padding:6px 10px;">High completeness</th>
+        </tr>
+        {rows_html}
+      </table>
+      <p style="font-size:0.8rem;margin-top:0.4rem;">
+        ⬤ marks this company's position. Green cells indicate lower disclosure risk; red cells indicate higher disclosure or greenwashing risk.
+      </p>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
 # --------- SUMMARY GENERATION ---------
 
 def generate_summary(
@@ -475,6 +599,16 @@ You are writing a comprehensive 1-page investor report for an AUTOMOTIVE company
 Here are structured scores and evidence:
 {payload_json}
 
+FORMATTING RULES (IMPORTANT):
+- Use markdown headings (##) exactly as requested below.
+- Use bullet points with "-" as the bullet.
+- You MAY use **bold** ONLY for short labels at the beginning of each bullet, e.g. **Revenue Growth:**.
+- DO NOT use italics or any other markdown formatting (no *text*, _text_, or inline code).
+- Write normal prose after the bold label in each bullet.
+- Ensure there are proper spaces between numbers and units and years, for example:
+  "180,683 million in 2024 to 195,201 million in 2025"
+  (note the spaces before and after "million" and "in").
+
 Generate a well-structured report with the following sections:
 
 ## EXECUTIVE OVERVIEW
@@ -487,7 +621,11 @@ Provide 4-6 bullet points analyzing:
 - Cash flow position and capital allocation (FCF, CapEx, R&D as % of revenue)
 - Operational efficiency (inventory management)
 
-For each bullet point, include supporting snippets from the evidence fields (actual numbers, percentages, or quotes).
+For each bullet point:
+- Start with a short bold label, e.g. **Revenue Growth:**
+- Then continue with plain text, including supporting snippets from the evidence fields
+  (actual numbers, percentages, or quotes).
+- Follow normal spacing conventions between numbers, units, and years.
 
 ## SUSTAINABILITY ANALYSIS (Score: {s_score}/15, Normalized: {s_norm:.1f}/10)
 Provide 4-6 bullet points analyzing:
@@ -496,24 +634,29 @@ Provide 4-6 bullet points analyzing:
 - Transparency and greenwashing assessment (specificity of claims, third-party verification)
 - Environmental compliance (water, waste, fines, supplier audits)
 
-For each bullet point, include supporting snippets from the evidence fields (actual emissions data, target dates, certifications).
+For each bullet point:
+- Start with a short bold label, e.g. **GHG Emissions:**
+- Then write plain text with supporting snippets from the evidence fields
+  (emissions data, target dates, certifications).
 
 ## STRENGTHS
-List 3-4 key competitive advantages or positive indicators based on the data.
+List 3-4 bullet points. Each bullet should start with a short bold label followed by plain text.
 
 ## WEAKNESSES
-List 3-4 areas of concern, gaps in disclosure, or negative trends.
+List 3-4 bullet points. Each bullet should start with a short bold label followed by plain text.
 
 ## RISK FACTORS
 Identify 3-4 material risks based on the financial and sustainability analysis:
 - Financial risks (cash burn, margin pressure, inventory issues, etc.)
 - Transition risks (EV adoption delays, regulatory changes, etc.)
 - ESG risks (emissions trajectory, greenwashing exposure, compliance issues, etc.)
+Again, each bullet should have a bold label followed by plain text.
 
 ## INVESTMENT RECOMMENDATION
 1-2 sentences with overall assessment and readiness for automotive industry transition.
+This section should be plain text (no bold or italics inside the sentences).
 
-Keep the entire report under 600 words. Use clear, professional language. Quote specific numbers from evidence fields.
+Keep the entire report under 600 words. Use clear, professional language. Quote specific numbers from evidence fields with proper spacing.
         """
     )
 
@@ -682,25 +825,32 @@ def main():
                     if fi:
                         st.subheader("💰 Financial Breakdown")
                         st.markdown(f"""
-                        - **Revenue Growth:** {fi.revenue_growth_score if fi.revenue_growth_score is not None else 'N/A'} / 2
-                        - **Gross Margin:** {fi.gross_margin_score if fi.gross_margin_score is not None else 'N/A'} / 2
-                        - **Operating Margin:** {fi.operating_margin_score if fi.operating_margin_score is not None else 'N/A'} / 2
-                        - **EBITDA Margin:** {fi.ebitda_margin_score if fi.ebitda_margin_score is not None else 'N/A'} / 2
-                        - **Free Cash Flow:** {fi.fcf_score if fi.fcf_score is not None else 'N/A'} / 2
-                        - **CapEx % of Revenue:** {fi.capex_score if fi.capex_score is not None else 'N/A'} / 2
-                        - **R&D % of Revenue:** {fi.rnd_score if fi.rnd_score is not None else 'N/A'} / 2
-                        - **Inventory/DIO:** {fi.inventory_score if fi.inventory_score is not None else 'N/A'} / 2
+                        - **Revenue Growth:** {fi.revenue_growth_score if fi.revenue_growth_score is not None else 'N/A'} / 2  
+                        - **Gross Margin:** {fi.gross_margin_score if fi.gross_margin_score is not None else 'N/A'} / 2  
+                        - **Operating Margin:** {fi.operating_margin_score if fi.operating_margin_score is not None else 'N/A'} / 2  
+                        - **EBITDA Margin:** {fi.ebitda_margin_score if fi.ebitda_margin_score is not None else 'N/A'} / 2  
+                        - **Free Cash Flow:** {fi.fcf_score if fi.fcf_score is not None else 'N/A'} / 2  
+                        - **CapEx % of Revenue:** {fi.capex_score if fi.capex_score is not None else 'N/A'} / 2  
+                        - **R&D % of Revenue:** {fi.rnd_score if fi.rnd_score is not None else 'N/A'} / 2  
+                        - **Inventory/DIO:** {fi.inventory_score if fi.inventory_score is not None else 'N/A'} / 2  
                         """)
 
                 with detail_col2:
                     if si:
                         st.subheader("🌍 Sustainability Breakdown")
                         st.markdown(f"""
-                        - **GHG Emissions:** {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4
-                        - **Automotive Targets:** {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4
-                        - **Transparency:** {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3
-                        - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4
+                        - **GHG Emissions:** {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4  
+                        - **Automotive Targets:** {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4  
+                        - **Transparency:** {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3  
+                        - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4  
                         """)
+
+                # ---- NEW: Disclosure Quality Matrix (Option 1) ----
+                if si:
+                    st.divider()
+                    st.subheader("🧭 Disclosure Quality Risk View")
+                    quality = compute_disclosure_quality(si)
+                    render_disclosure_matrix(quality)
 
             # Generate and display summary
             if fi and si:

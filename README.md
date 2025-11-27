@@ -1,23 +1,56 @@
 # CPSC-1710-Final-Project
 Financial/Sustainability Analysis Tool for Introduction to AI Applications
 
-FINANCIAL CRITERIA
-
-
-# Automotive-Specific Sustainability Criteria
+# Automotive-Specific Financial & Sustainability Criteria
 
 ## Overview
 This tool has been customized to assess **automotive manufacturers** specifically, with sustainability criteria tailored to the EV transition and automotive industry challenges.
 
 ## Scoring Structure
 
-### Financial Indicators (5 points → normalized to 10)
-Unchanged from original:
-- Revenue growth (YoY)
-- Margin stability/improvement
-- Free cash flow/operating cash flow
-- Leverage trends
-- Forward guidance
+### Financial Indicators (16 points → normalized to 10)
+
+#### 1. Revenue Growth (2 points)
+- 2: Revenue increased >5% year-over-year
+- 1: Revenue increased 0-5% year-over-year
+- 0: Revenue declined or flat
+
+#### 2. Gross Margin (2 points)
+- 2: Gross margin is positive AND improved year-over-year
+- 1: Gross margin is positive but flat or declined
+- 0: Gross margin is negative
+
+#### 3. Operating Margin (2 points)
+- 2: Operating margin is positive AND improved year-over-year
+- 1: Operating margin is positive but flat or declined
+- 0: Operating margin is negative
+
+#### 4. EBITDA Margin (2 points)
+- 2: EBITDA margin is positive AND improved year-over-year
+- 1: EBITDA margin is positive but flat or declined
+- 0: EBITDA margin is negative
+
+#### 5. Free Cash Flow (2 points)
+- 2: FCF is clearly positive
+- 1: FCF is around break-even (0 to -5% of revenue)
+- 0: FCF is clearly negative (worse than -5% of revenue)
+
+#### 6. CapEx as % of Revenue (2 points)
+- 2: CapEx is 3-8% of revenue (healthy range)
+- 1: CapEx is 8-12% of revenue (aggressive but acceptable)
+- 0: CapEx is <3% (under-investing) OR >12% (very heavy spending)
+
+#### 7. R&D as % of Revenue (2 points)
+- 2: R&D is 4-10% of revenue
+- 1: R&D is 2-4% of revenue (minimal but acceptable)
+- 0: R&D is <2% (under-investing) OR >10% (very high)
+
+#### 8. Inventory & Days Inventory Outstanding (2 points)
+- 2: DIO <40 days OR inventory lean/tightly managed
+- 1: DIO 40-70 days OR inventory normal/acceptable
+- 0: DIO >70 days OR inventory clearly elevated/excess
+
+**Why this matters:** These granular financial metrics provide a comprehensive view of profitability, cash generation, capital allocation, and operational efficiency—critical factors for automotive companies navigating the EV transition.
 
 ### Sustainability Indicators (15 points → normalized to 10)
 
@@ -71,13 +104,19 @@ Unchanged from original:
 ## How the Tool Works
 
 ### Multi-Pass RAG Retrieval
+
+**Financial Analysis:**
+- Single comprehensive retrieval query for all financial metrics including revenue, margins, cash flow, CapEx, R&D, and inventory data
+- Extracts 8 indicators with numeric scoring (0-2 points each) for a total of 16 points
+
+**Sustainability Analysis:**
 The tool uses **3 separate retrieval queries** to ensure comprehensive coverage:
 
 1. **GHG Query:** Retrieves chunks about Scope 1/2/3 emissions and YoY changes
 2. **Automotive Query:** Retrieves chunks about EVs, batteries, ICE phase-out, supply chain
 3. **Quality/Compliance Query:** Retrieves chunks about sustainability claims, water, waste, fines, audits
 
-All contexts are combined before analysis to ensure the LLM has relevant information for all 15 criteria.
+All contexts are combined before analysis to ensure the LLM has relevant information for all 15 sustainability criteria.
 
 ---
 
@@ -85,23 +124,33 @@ All contexts are combined before analysis to ensure the LLM has relevant informa
 
 ### Scores Display
 ```
-Financial score: X / 5 (normalized: Y / 10)
+Financial score: X / 16 (normalized: Y / 10)
+  - Revenue Growth: A / 2
+  - Gross Margin: B / 2
+  - Operating Margin: C / 2
+  - EBITDA Margin: D / 2
+  - Free Cash Flow: E / 2
+  - CapEx % of Revenue: F / 2
+  - R&D % of Revenue: G / 2
+  - Inventory/DIO: H / 2
+
 Sustainability score: Z / 15 (normalized: W / 10)
-  - GHG Emissions: A / 4
-  - Automotive Targets: B / 4
-  - Transparency: C / 3
-  - Environmental/Compliance: D / 4
-Overall score: E / 10
+  - GHG Emissions: I / 4
+  - Automotive Targets: J / 4
+  - Transparency: K / 3
+  - Environmental/Compliance: L / 4
+
+Overall score: M / 10
 ```
 
 ### Investor Summary
 Tailored to automotive industry with focus on:
-- Financial health
-- GHG emissions transparency
-- EV transition readiness
-- Greenwashing detection
-- Environmental compliance
-- Overall readiness for automotive industry transition
+- **Financial health:** Revenue growth, profitability margins (gross, operating, EBITDA), cash flow generation, capital allocation (CapEx, R&D), and inventory efficiency
+- **GHG emissions transparency:** Scope 1/2/3 reporting and year-over-year trends
+- **EV transition readiness:** Production targets, battery recycling, ICE phase-out timelines
+- **Greenwashing detection:** Specificity of claims, supporting evidence, avoidance of excessive self-praise
+- **Environmental compliance:** Water usage, hazardous waste, regulatory fines, supplier audits
+- **Overall readiness:** Comprehensive assessment for automotive industry transition
 
 ---
 
@@ -139,7 +188,8 @@ streamlit run app.py
 
 This will open a web interface in your browser where you can:
 - Upload financial and/or sustainability reports via drag-and-drop
-- View interactive scores and breakdowns
+- View interactive scores and breakdowns (Financial: 0-16 points, Sustainability: 0-15 points)
+- See a visual disclosure quality matrix showing greenwashing risk
 - Download the investor summary as a text file
 - See detailed raw indicators for debugging
 
