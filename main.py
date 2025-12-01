@@ -105,7 +105,7 @@ class SustainabilityIndicators:
     audit_evidence: str
 
 
-# --------- RAG HELPERS (used for sustainability only) ---------
+# --------- RAG HELPERS (vectorstores for financial + sustainability) ---------
 
 def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     """Load a PDF, chunk it, embed the chunks, and store in FAISS."""
@@ -151,8 +151,8 @@ def get_llm() -> ChatOpenAI:
 
 def extract_financial_indicators(llm: ChatOpenAI, context: str) -> FinancialIndicators:
     """
-    Extract financial indicators from FULL financial report text (non-RAG).
-    The context should be the concatenated text of the financial PDF.
+    Extract financial indicators from financial report text (can be full report
+    or a reduced subset containing key financial statements and notes).
     """
 
     prompt = ChatPromptTemplate.from_template(
@@ -615,20 +615,56 @@ Keep the entire report under 600 words. Use clear, professional language. Quote 
 # --------- MAIN ---------
 
 def main():
-    # 1) Financial analysis (NON-RAG: full document context)
+    # 1) Financial analysis (Pattern A: targeted retrieval + non-RAG scoring)
     fi = None
     f_score = 0
     f_score_normalized = 0
 
     if FINANCIAL_PDF_PATH:
         llm = get_llm()
-        print("\nLoading financial report (non-RAG)...")
-        loader = PyPDFLoader(FINANCIAL_PDF_PATH)
-        financial_docs = loader.load()
-        # Concatenate all pages into one context string
-        financial_context = "\n\n".join(d.page_content for d in financial_docs)
+        print("\nBuilding vector store for financial report (targeted retrieval)...")
+        financial_vs = build_vectorstore_from_pdf(FINANCIAL_PDF_PATH)
 
-        print("\nExtracting financial indicators...")
+        print("\nRetrieving key financial statement sections...")
+
+        income_context = retrieve_context(
+            "consolidated statements of operations income statement net sales revenue gross profit cost of sales cost of revenue net income",
+            financial_vs,
+            k=8,
+        )
+
+        balance_context = retrieve_context(
+            "consolidated balance sheets inventory total assets current assets total liabilities shareholders equity",
+            financial_vs,
+            k=8,
+        )
+
+        cashflow_context = retrieve_context(
+            "consolidated statements of cash flows cash flow from operations capital expenditures additions to property plant and equipment free cash flow",
+            financial_vs,
+            k=8,
+        )
+
+        mdna_context = retrieve_context(
+            "management discussion and analysis revenue growth year over year margin trends operating margin ebitda",
+            financial_vs,
+            k=6,
+        )
+
+        financial_context = "\n\n".join(
+            [
+                "# INCOME STATEMENT SECTION\n",
+                income_context,
+                "\n\n# BALANCE SHEET SECTION\n",
+                balance_context,
+                "\n\n# CASH FLOW / CAPEX / FCF SECTION\n",
+                cashflow_context,
+                "\n\n# MD&A / NARRATIVE TRENDS SECTION\n",
+                mdna_context,
+            ]
+        )
+
+        print("\nExtracting financial indicators from retrieved context...")
         fi = extract_financial_indicators(llm, financial_context)
         f_score = compute_financial_score(fi)
         f_score_normalized = (f_score / 16) * 10

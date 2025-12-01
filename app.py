@@ -83,7 +83,7 @@ class SustainabilityIndicators:
     audit_evidence: str
 
 
-# --------- RAG HELPERS (for sustainability) ---------
+# --------- RAG HELPERS (for financial + sustainability) ---------
 
 def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     """Load a PDF, chunk it, embed the chunks, and store in FAISS."""
@@ -105,16 +105,29 @@ def retrieve_context(question: str, vs: FAISS, k: int = 5) -> str:
 
 
 def get_llm() -> ChatOpenAI:
-    """Create a deterministic ChatOpenAI client for extraction & summaries."""
+    """LLM for free-text generation (e.g., investor summary)."""
     return ChatOpenAI(model=MODEL_NAME, temperature=0.0)
 
 
+def get_json_llm() -> ChatOpenAI:
+    """
+    LLM configured to ALWAYS return a JSON object
+    (used for extraction functions to avoid JSONDecodeError).
+    """
+    return ChatOpenAI(
+        model=MODEL_NAME,
+        temperature=0.0,
+        model_kwargs={"response_format": {"type": "json_object"}}
+    )
+
+
 # --------- EXTRACTION FUNCTIONS ---------
-# FINANCIAL: NON-RAG (full document context)
+# FINANCIAL: Pattern A (reduced context, still non-RAG scoring)
+
 def extract_financial_indicators(llm: ChatOpenAI, context: str) -> FinancialIndicators:
     """
-    Extract financial indicators from FULL financial report text (non-RAG).
-    The context should be the concatenated text of the financial PDF.
+    Extract financial indicators from financial report text.
+    The context should already be a reduced, relevant subset of the PDF.
     """
 
     prompt = ChatPromptTemplate.from_template(
@@ -271,7 +284,8 @@ ONLY output the JSON object, no extra text.
     )
 
 
-# SUSTAINABILITY: still RAG
+# SUSTAINABILITY: RAG + JSON extraction
+
 def extract_sustainability_indicators(llm: ChatOpenAI, vs: FAISS) -> SustainabilityIndicators:
     # Multiple retrieval passes for different aspects
     ghg_context = retrieve_context(
@@ -464,13 +478,7 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
 def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
     """
     Compute completeness and reliability levels for the Option 1 matrix.
-
-    Completeness of disclosure:
-        - Based on whether key sustainability metrics are reported.
-    Reliability of claims:
-        - Based on greenwashing-related indicators.
     """
-    # Key metrics that represent basic disclosure completeness
     completeness_flags = [
         si.ghg_scope1_reported,
         si.ghg_scope2_reported,
@@ -488,7 +496,6 @@ def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
 
     completeness_ratio = sum(completeness_flags) / len(completeness_flags) if completeness_flags else 0.0
 
-    # Claim-quality / anti-greenwashing checks
     reliability_flags = [
         si.claims_have_specificity,
         si.claims_have_supporting_evidence,
@@ -515,21 +522,14 @@ def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
 def render_disclosure_matrix(quality: Dict[str, Any]):
     """
     Render a 3×3 coloured matrix (Option 1) in Streamlit using HTML.
-
-    X-axis: Completeness of Disclosure (Low → High)
-    Y-axis: Reliability of Claims (Low → High)
-    Cell text = approximate risk level; current company cell is marked with ⬤.
     """
     completeness_level = quality["completeness_level"]
     reliability_level = quality["reliability_level"]
     completeness_ratio = quality["completeness_ratio"]
     reliability_ratio = quality["reliability_ratio"]
 
-    # Define risk level and colours for each combination
-    # (row = reliability, col = completeness)
     levels = ["Low", "Medium", "High"]
 
-    # risk labels roughly following a risk-matrix style
     risk_map = {
         ("Low", "Low"): ("High", "#d73027"),
         ("Low", "Medium"): ("High", "#d73027"),
@@ -542,9 +542,7 @@ def render_disclosure_matrix(quality: Dict[str, Any]):
         ("High", "High"): ("Low", "#66bd63"),
     }
 
-    # Build table rows
     rows_html = ""
-    # Show High reliability at top down to Low (like heatmaps with likelihood axis)
     for rel in reversed(levels):
         row_cells = f'<td style="font-weight:600;padding:6px 10px;white-space:nowrap;">{rel} reliability</td>'
         for comp in levels:
@@ -737,7 +735,6 @@ def main():
             st.error("⚠️ Please upload at least one report to analyze.")
             return
 
-        # Initialize variables
         fi = None
         si = None
         f_score = 0
@@ -746,27 +743,57 @@ def main():
         s_score_normalized = 0
 
         try:
-            llm = get_llm()
+            # Separate LLMs: JSON one for extraction, text one for summary
+            llm_text = get_llm()
+            llm_json = get_json_llm()
 
-            # Process financial report (NON-RAG: full document)
+            # Process financial report (Pattern A: targeted retrieval + non-RAG scoring)
             if financial_file:
                 with st.spinner("📊 Analyzing financial report..."):
-                    # Save uploaded file to temp directory
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                         tmp_file.write(financial_file.read())
                         financial_path = tmp_file.name
 
-                    # Load full PDF and concatenate text
-                    loader = PyPDFLoader(financial_path)
-                    financial_docs = loader.load()
-                    financial_context = "\n\n".join(d.page_content for d in financial_docs)
+                    financial_vs = build_vectorstore_from_pdf(financial_path)
 
-                    # Extract indicators
-                    fi = extract_financial_indicators(llm, financial_context)
+                    income_context = retrieve_context(
+                        "consolidated statements of operations income statement net sales revenue gross profit cost of sales cost of revenue net income",
+                        financial_vs,
+                        k=8,
+                    )
+                    balance_context = retrieve_context(
+                        "consolidated balance sheets inventory total assets current assets total liabilities shareholders equity",
+                        financial_vs,
+                        k=8,
+                    )
+                    cashflow_context = retrieve_context(
+                        "consolidated statements of cash flows cash flow from operations capital expenditures additions to property plant and equipment free cash flow",
+                        financial_vs,
+                        k=8,
+                    )
+                    mdna_context = retrieve_context(
+                        "management discussion and analysis revenue growth year over year margin trends operating margin ebitda",
+                        financial_vs,
+                        k=6,
+                    )
+
+                    financial_context = "\n\n".join(
+                        [
+                            "# INCOME STATEMENT SECTION\n",
+                            income_context,
+                            "\n\n# BALANCE SHEET SECTION\n",
+                            balance_context,
+                            "\n\n# CASH FLOW / CAPEX / FCF SECTION\n",
+                            cashflow_context,
+                            "\n\n# MD&A / NARRATIVE TRENDS SECTION\n",
+                            mdna_context,
+                        ]
+                    )
+
+                    fi = extract_financial_indicators(llm_json, financial_context)
                     f_score = compute_financial_score(fi)
                     f_score_normalized = (f_score / 16) * 10
 
-                    # Clean up temp file
                     os.unlink(financial_path)
 
                 st.success("✅ Financial analysis complete!")
@@ -778,13 +805,11 @@ def main():
                         tmp_file.write(sustainability_file.read())
                         sustainability_path = tmp_file.name
 
-                    # Build vector store and extract indicators
                     sustainability_vs = build_vectorstore_from_pdf(sustainability_path)
-                    si = extract_sustainability_indicators(llm, sustainability_vs)
+                    si = extract_sustainability_indicators(llm_json, sustainability_vs)
                     s_score = compute_sustainability_score(si)
                     s_score_normalized = (s_score / 15) * 10
 
-                    # Clean up temp file
                     os.unlink(sustainability_path)
 
                 st.success("✅ Sustainability analysis complete!")
@@ -836,7 +861,7 @@ def main():
                 else:
                     st.metric("Overall Score", "N/A", "No reports uploaded")
 
-            # Display detailed breakdown
+            # Detailed breakdown
             if fi or si:
                 st.divider()
 
@@ -866,18 +891,17 @@ def main():
                         - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4  
                         """)
 
-                # Disclosure Quality Matrix
                 if si:
                     st.divider()
                     st.subheader("🧭 Disclosure Quality Risk View")
                     quality = compute_disclosure_quality(si)
                     render_disclosure_matrix(quality)
 
-            # Generate and display summary
+            # Investor summary
             if fi and si:
                 st.divider()
                 with st.spinner("📝 Generating comprehensive investor summary..."):
-                    summary = generate_summary(llm, f_score, s_score, fi, si)
+                    summary = generate_summary(llm_text, f_score, s_score, fi, si)
 
                 st.header("📄 Investor Summary")
                 st.markdown(summary)
@@ -888,13 +912,11 @@ def main():
                     file_name="investor_summary.txt",
                     mime="text/plain"
                 )
-
             elif fi:
                 st.info("💡 Upload a sustainability report to generate a comprehensive investor summary.")
             elif si:
                 st.info("💡 Upload a financial report to generate a comprehensive investor summary.")
 
-            # Expandable raw indicators
             if fi or si:
                 st.divider()
                 with st.expander("🔍 View Raw Indicators (Debug)"):
