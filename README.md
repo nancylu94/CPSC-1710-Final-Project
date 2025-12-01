@@ -131,20 +131,23 @@ This tool has been customized to assess **automotive manufacturers** specificall
 
 ## How the Tool Works
 
-### Multi-Pass RAG Retrieval
+### Multi-Pass Retrieval & Analysis
 
 **Financial Analysis:**
-- Single comprehensive retrieval query for all financial metrics including revenue, margins, cash flow, CapEx, R&D, and inventory data
-- Extracts 8 indicators with numeric scoring (0-2 points each) for a total of 16 points
+- Builds a vector store from the uploaded financial report and runs **4 targeted retrieval queries**  
+  (income statement, balance sheet, cash flow/CapEx/FCF, and MD&A / narrative trends).
+- Combines the retrieved chunks into a **single reduced context**, then runs one extraction pass (no further RAG).
+- Extracts **8 financial indicators** with numeric scoring (0–2 points each), for a total of **16 points**.
 
 **Sustainability Analysis:**
 The tool uses **3 separate retrieval queries** to ensure comprehensive coverage:
 
-1. **GHG Query:** Retrieves chunks about Scope 1/2/3 emissions and YoY changes
-2. **Automotive Query:** Retrieves chunks about EVs, batteries, ICE phase-out, supply chain
-3. **Quality/Compliance Query:** Retrieves chunks about sustainability claims, water, waste, fines, audits
+1. **GHG Query** – Scope 1/2/3 emissions and year-on-year changes  
+2. **Automotive Transition Query** – EV production, battery recycling, ICE phase-out, supply-chain traceability  
+3. **Quality & Compliance Query** – sustainability claims, water usage, hazardous waste, regulatory fines, supplier audits  
 
-All contexts are combined before analysis to ensure the LLM has relevant information for all 15 sustainability criteria.
+All retrieved contexts are combined before analysis so the LLM has the relevant evidence for all **15 sustainability criteria**.
+
 
 ---
 
