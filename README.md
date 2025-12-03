@@ -222,6 +222,7 @@ This will open a web interface in your browser where you can:
 - View interactive scores and breakdowns (Financial: 0-16 points, Sustainability: 0-15 points)
 - See a visual disclosure quality matrix showing greenwashing risk
 - Download the investor summary as a text file
+- **Ask questions via chat assistant** - Right sidebar chat with RAG-enabled Q&A
 - See detailed raw indicators for debugging
 
 **Requirements:**
@@ -229,6 +230,37 @@ This will open a web interface in your browser where you can:
 - Internet connection for OpenAI API calls
 
 **Processing time:** ~2-3 minutes depending on document size and API response time.
+
+#### AI Chat Assistant (RAG-Enabled)
+
+After analysis is complete, the **chat assistant** automatically appears in the **right sidebar** where you can:
+
+**Two modes of questioning:**
+
+1. **Analysis questions** - Ask about the extracted scores and indicators:
+   - "Why did the company score low on operating margin?"
+   - "What are the biggest sustainability concerns?"
+   - "How does the CapEx spending compare to healthy ranges?"
+
+2. **Document search questions** - Ask questions that require retrieving from the original PDFs:
+   - "What does the report say about supply chain risks?"
+   - "Find mentions of lithium battery suppliers"
+   - "Show me the company's future EV production plans"
+   - "Does the report mention any regulatory violations?"
+
+**How it works:**
+- The assistant automatically detects when a question needs document retrieval (keywords like "report says", "find", "mention", "search")
+- Uses RAG (Retrieval-Augmented Generation) to search the original PDF embeddings for relevant passages
+- Combines extracted analysis data with retrieved document excerpts for comprehensive answers
+- Maintains conversation history throughout your session
+- **Sidebar design** keeps the investor summary and analysis visible in the main area while you ask questions
+
+**Features:**
+- ✅ Context-aware responses with specific numbers and evidence
+- ✅ Conversation history tracking
+- ✅ Access to both structured analysis AND raw document content
+- ✅ Clear chat history button
+- ✅ Sidebar design keeps analysis visible while chatting
 
 ---
 

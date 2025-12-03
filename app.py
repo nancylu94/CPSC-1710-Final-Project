@@ -794,6 +794,9 @@ def main():
                     f_score = compute_financial_score(fi)
                     f_score_normalized = (f_score / 16) * 10
 
+                    # Store vector store in session state for chat RAG
+                    st.session_state['financial_vectorstore'] = financial_vs
+
                     os.unlink(financial_path)
 
                 st.success("✅ Financial analysis complete!")
@@ -809,6 +812,9 @@ def main():
                     si = extract_sustainability_indicators(llm_json, sustainability_vs)
                     s_score = compute_sustainability_score(si)
                     s_score_normalized = (s_score / 15) * 10
+
+                    # Store vector store in session state for chat RAG
+                    st.session_state['sustainability_vectorstore'] = sustainability_vs
 
                     os.unlink(sustainability_path)
 
@@ -927,9 +933,155 @@ def main():
                         st.subheader("Sustainability Indicators")
                         st.json(si.__dict__)
 
+            # Store analysis results in session state for chat
+            if fi or si:
+                st.session_state['analysis_complete'] = True
+                st.session_state['financial_indicators'] = fi
+                st.session_state['sustainability_indicators'] = si
+                st.session_state['financial_score'] = f_score
+                st.session_state['sustainability_score'] = s_score
+                st.session_state['overall_score'] = overall
+                st.session_state['investor_summary'] = summary if (fi and si) else None
+
         except Exception as e:
             st.error(f"❌ Error during analysis: {str(e)}")
             st.exception(e)
+
+    # Conversational Chat Interface - Right sidebar
+    if st.session_state.get('analysis_complete', False):
+        # Initialize chat state
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+
+        # Use sidebar for chat
+        with st.sidebar:
+            st.markdown("### 💬 Analysis Assistant")
+            st.markdown("Ask questions about the analysis or search the original reports.")
+            st.divider()
+
+            # Display chat history
+            chat_container = st.container(height=400)
+            with chat_container:
+                for message in st.session_state.chat_history:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+
+            # Chat input
+            user_question = st.chat_input("Ask a question...", key="chat_input_sidebar")
+
+            if user_question:
+                # Add user message
+                st.session_state.chat_history.append({"role": "user", "content": user_question})
+
+                # Prepare context
+                fi = st.session_state.get('financial_indicators')
+                si = st.session_state.get('sustainability_indicators')
+                summary = st.session_state.get('investor_summary')
+                f_vs = st.session_state.get('financial_vectorstore')
+                s_vs = st.session_state.get('sustainability_vectorstore')
+
+                # Check if question needs RAG retrieval
+                needs_rag = any(keyword in user_question.lower() for keyword in [
+                    'report', 'document', 'says', 'mention', 'find', 'search',
+                    'look for', 'does it say', 'what about', 'show me', 'tell me about'
+                ])
+
+                # Build context
+                context_parts = []
+
+                # Always include extracted indicators
+                if fi:
+                    context_parts.append(f"Financial Analysis (Score: {st.session_state.get('financial_score')}/16):\n{json.dumps(fi.__dict__, indent=2)}")
+                if si:
+                    context_parts.append(f"Sustainability Analysis (Score: {st.session_state.get('sustainability_score')}/15):\n{json.dumps(si.__dict__, indent=2)}")
+                if summary:
+                    context_parts.append(f"Investor Summary:\n{summary}")
+
+                # Add RAG context if needed
+                rag_context = ""
+                if needs_rag:
+                    rag_parts = []
+                    if f_vs:
+                        financial_docs = retrieve_context(user_question, f_vs, k=5)
+                        rag_parts.append(f"FINANCIAL REPORT EXCERPTS:\n{financial_docs}")
+                    if s_vs:
+                        sustainability_docs = retrieve_context(user_question, s_vs, k=5)
+                        rag_parts.append(f"SUSTAINABILITY REPORT EXCERPTS:\n{sustainability_docs}")
+                    rag_context = "\n\n".join(rag_parts)
+
+                analysis_context = "\n\n".join(context_parts)
+
+                # Build conversation history
+                conversation_history = ""
+                for msg in st.session_state.chat_history[:-1]:
+                    conversation_history += f"{msg['role'].upper()}: {msg['content']}\n\n"
+
+                # Create prompt
+                if needs_rag and rag_context:
+                    chat_prompt = ChatPromptTemplate.from_template(
+                        """
+You are an expert financial and ESG analyst helping an investor understand their automotive company analysis.
+
+EXTRACTED ANALYSIS RESULTS:
+{analysis_context}
+
+RELEVANT DOCUMENT EXCERPTS (from original reports):
+{rag_context}
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+USER QUESTION: {user_question}
+
+Provide a helpful, concise answer. Use specific numbers and quotes from BOTH the analysis results AND the document excerpts when relevant. If the information isn't available in either source, say so clearly.
+
+Keep responses focused and professional. Use markdown formatting for clarity.
+                        """
+                    )
+                    llm_chat = get_llm()
+                    chain = chat_prompt | llm_chat
+                    response = chain.invoke({
+                        "analysis_context": analysis_context,
+                        "rag_context": rag_context,
+                        "conversation_history": conversation_history,
+                        "user_question": user_question
+                    })
+                else:
+                    chat_prompt = ChatPromptTemplate.from_template(
+                        """
+You are an expert financial and ESG analyst helping an investor understand their automotive company analysis.
+
+ANALYSIS RESULTS:
+{analysis_context}
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+USER QUESTION: {user_question}
+
+Provide a helpful, concise answer based on the analysis results. Use specific numbers and evidence from the analysis when relevant. If the question requires information from the original reports that wasn't extracted, suggest the user rephrase their question to search the documents.
+
+Keep responses focused and professional. Use markdown formatting for clarity.
+                        """
+                    )
+                    llm_chat = get_llm()
+                    chain = chat_prompt | llm_chat
+                    response = chain.invoke({
+                        "analysis_context": analysis_context,
+                        "conversation_history": conversation_history,
+                        "user_question": user_question
+                    })
+
+                assistant_response = response.content.strip()
+                st.session_state.chat_history.append({"role": "assistant", "content": assistant_response})
+                st.rerun()
+
+            # Clear chat button
+            st.divider()
+            if st.session_state.chat_history:
+                if st.button("🗑️ Clear Chat History", key="clear_chat_sidebar", use_container_width=True):
+                    st.session_state.chat_history = []
+                    st.rerun()
 
 
 if __name__ == "__main__":
