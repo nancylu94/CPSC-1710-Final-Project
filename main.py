@@ -185,8 +185,8 @@ Compare YoY to determine if improved.
 
 Scoring:
 - 2: Gross margin % is positive AND clearly higher than previous year
-- 1: Gross margin % is positive but NOT clearly higher (flat, lower, or no YoY info)
-- 0: Gross margin % is negative
+- 1: Gross margin % is positive but declined OR negative but improved from previous year
+- 0: Gross margin % is negative AND did not improve (flat or worse)
 - null: Cannot calculate gross margin (missing revenue or gross profit/COGS data)
 
 **3) Operating Margin (operating_margin_score)**
@@ -196,8 +196,8 @@ Compare YoY to determine if improved.
 
 Scoring:
 - 2: Operating margin % is positive AND clearly higher than previous year
-- 1: Operating margin % is positive but NOT clearly higher
-- 0: Operating margin % is negative
+- 1: Operating margin % is positive but declined OR negative but improved from previous year
+- 0: Operating margin % is negative AND did not improve (flat or worse)
 - null: Cannot calculate operating margin (missing required data)
 
 **4) EBITDA Margin (ebitda_margin_score)**
@@ -207,8 +207,8 @@ Compare YoY to determine if improved.
 
 Scoring:
 - 2: EBITDA margin % is positive AND clearly higher than previous year
-- 1: EBITDA margin % is positive but NOT clearly higher
-- 0: EBITDA margin % is negative
+- 1: EBITDA margin % is positive but declined OR negative but improved from previous year
+- 0: EBITDA margin % is negative AND did not improve (flat or worse)
 - null: Cannot calculate EBITDA margin (missing required data)
 
 **5) Free Cash Flow (fcf_score)**

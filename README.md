@@ -21,8 +21,8 @@ This tool has been customized to assess **automotive manufacturers** specificall
 
 #### 2. Gross Margin (2 points)
 - 2: Gross margin is positive AND improved year-over-year
-- 1: Gross margin is positive but flat or declined
-- 0: Gross margin is negative
+- 1: Gross margin is positive but declined OR negative but improved year-over-year
+- 0: Gross margin is negative AND did not improve (flat or worse)
 
 **Why this matters:** Improving gross margins demonstrate pricing power and manufacturing efficiency, critical as EV production scales and battery costs decline.
 
@@ -30,8 +30,8 @@ This tool has been customized to assess **automotive manufacturers** specificall
 
 #### 3. Operating Margin (2 points)
 - 2: Operating margin is positive AND improved year-over-year
-- 1: Operating margin is positive but flat or declined
-- 0: Operating margin is negative
+- 1: Operating margin is positive but declined OR negative but improved year-over-year
+- 0: Operating margin is negative AND did not improve (flat or worse)
 
 **Why this matters:** Operating margin improvement shows effective cost management during the capital-intensive EV transition period.
 
@@ -39,8 +39,8 @@ This tool has been customized to assess **automotive manufacturers** specificall
 
 #### 4. EBITDA Margin (2 points)
 - 2: EBITDA margin is positive AND improved year-over-year
-- 1: EBITDA margin is positive but flat or declined
-- 0: EBITDA margin is negative
+- 1: EBITDA margin is positive but declined OR negative but improved year-over-year
+- 0: EBITDA margin is negative AND did not improve (flat or worse)
 
 **Why this matters:** EBITDA margin reveals core operational profitability before accounting for heavy depreciation from manufacturing investments.
 

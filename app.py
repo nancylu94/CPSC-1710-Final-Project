@@ -17,17 +17,14 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 
-# Load environment variables
+# Load environment variables (optional - for development)
 load_dotenv()
 
 # --------- CONFIG ---------
 MODEL_NAME = "gpt-4o-mini"
 
-if "OPENAI_API_KEY" not in os.environ:
-    st.error("OPENAI_API_KEY not found. Please create a .env file with OPENAI_API_KEY=your_key")
-    st.stop()
-
 # --------- DATA CLASSES ---------
+
 
 @dataclass
 class FinancialIndicators:
@@ -85,7 +82,8 @@ class SustainabilityIndicators:
 
 # --------- RAG HELPERS (for financial + sustainability) ---------
 
-def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
+
+def build_vectorstore_from_pdf(pdf_path: str, api_key: str) -> FAISS:
     """Load a PDF, chunk it, embed the chunks, and store in FAISS."""
     loader = PyPDFLoader(pdf_path)
     documents = loader.load()
@@ -93,7 +91,7 @@ def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_documents(documents)
 
-    embeddings = OpenAIEmbeddings()
+    embeddings = OpenAIEmbeddings(api_key=api_key)
     vectorstore = FAISS.from_documents(chunks, embeddings)
     return vectorstore
 
@@ -104,12 +102,12 @@ def retrieve_context(question: str, vs: FAISS, k: int = 5) -> str:
     return "\n\n".join([d.page_content for d in docs])
 
 
-def get_llm() -> ChatOpenAI:
-    """LLM for free-text generation (e.g., investor summary)."""
-    return ChatOpenAI(model=MODEL_NAME, temperature=0.0)
+def get_llm(api_key: str) -> ChatOpenAI:
+    """LLM for free-text generation (e.g., investor summary or chat)."""
+    return ChatOpenAI(model=MODEL_NAME, temperature=0.0, api_key=api_key)
 
 
-def get_json_llm() -> ChatOpenAI:
+def get_json_llm(api_key: str) -> ChatOpenAI:
     """
     LLM configured to ALWAYS return a JSON object
     (used for extraction functions to avoid JSONDecodeError).
@@ -117,12 +115,14 @@ def get_json_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=MODEL_NAME,
         temperature=0.0,
-        model_kwargs={"response_format": {"type": "json_object"}}
+        api_key=api_key,
+        model_kwargs={"response_format": {"type": "json_object"}},
     )
 
 
 # --------- EXTRACTION FUNCTIONS ---------
 # FINANCIAL: Pattern A (reduced context, still non-RAG scoring)
+
 
 def extract_financial_indicators(llm: ChatOpenAI, context: str) -> FinancialIndicators:
     """
@@ -160,8 +160,8 @@ Compare YoY to determine if improved.
 
 Scoring:
 - 2: Gross margin % is positive AND clearly higher than previous year
-- 1: Gross margin % is positive but NOT clearly higher (flat, lower, or no YoY info)
-- 0: Gross margin % is negative
+- 1: Gross margin % is positive but declined OR negative but improved from previous year
+- 0: Gross margin % is negative AND did not improve (flat or worse)
 - null: Cannot calculate gross margin (missing revenue or gross profit/COGS data)
 
 **3) Operating Margin (operating_margin_score)**
@@ -171,8 +171,8 @@ Compare YoY to determine if improved.
 
 Scoring:
 - 2: Operating margin % is positive AND clearly higher than previous year
-- 1: Operating margin % is positive but NOT clearly higher
-- 0: Operating margin % is negative
+- 1: Operating margin % is positive but declined OR negative but improved from previous year
+- 0: Operating margin % is negative AND did not improve (flat or worse)
 - null: Cannot calculate operating margin (missing required data)
 
 **4) EBITDA Margin (ebitda_margin_score)**
@@ -182,8 +182,8 @@ Compare YoY to determine if improved.
 
 Scoring:
 - 2: EBITDA margin % is positive AND clearly higher than previous year
-- 1: EBITDA margin % is positive but NOT clearly higher
-- 0: EBITDA margin % is negative
+- 1: EBITDA margin % is positive but declined OR negative but improved from previous year
+- 0: EBITDA margin % is negative AND did not improve (flat or worse)
 - null: Cannot calculate EBITDA margin (missing required data)
 
 **5) Free Cash Flow (fcf_score)**
@@ -286,21 +286,25 @@ ONLY output the JSON object, no extra text.
 
 # SUSTAINABILITY: RAG + JSON extraction
 
+
 def extract_sustainability_indicators(llm: ChatOpenAI, vs: FAISS) -> SustainabilityIndicators:
     # Multiple retrieval passes for different aspects
     ghg_context = retrieve_context(
         "Scope 1, Scope 2, and Scope 3 greenhouse gas emissions with numeric values and year-on-year changes",
-        vs, k=8
+        vs,
+        k=8,
     )
 
     auto_context = retrieve_context(
         "EV production percentages, battery recycling rates, ICE phase-out dates, supply chain traceability",
-        vs, k=8
+        vs,
+        k=8,
     )
 
     quality_context = retrieve_context(
         "Sustainability claims, net-zero commitments, water usage, hazardous waste, regulatory fines, supplier audits",
-        vs, k=8
+        vs,
+        k=8,
     )
 
     combined_context = f"{ghg_context}\n\n{auto_context}\n\n{quality_context}"
@@ -406,6 +410,7 @@ ONLY output the JSON object, no extra text.
 
 # --------- SCORING ---------
 
+
 def compute_financial_score(fi: FinancialIndicators) -> int:
     """Sum all financial indicator scores. Maximum: 16 points."""
     score = 0
@@ -475,6 +480,7 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
 
 # --------- DISCLOSURE QUALITY MATRIX HELPERS ---------
 
+
 def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
     """
     Compute completeness and reliability levels for the Option 1 matrix.
@@ -494,14 +500,18 @@ def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
         si.supplier_audit_frequency,
     ]
 
-    completeness_ratio = sum(completeness_flags) / len(completeness_flags) if completeness_flags else 0.0
+    completeness_ratio = (
+        sum(completeness_flags) / len(completeness_flags) if completeness_flags else 0.0
+    )
 
     reliability_flags = [
         si.claims_have_specificity,
         si.claims_have_supporting_evidence,
         si.avoids_excessive_self_praise,
     ]
-    reliability_ratio = sum(reliability_flags) / len(reliability_flags) if reliability_flags else 0.0
+    reliability_ratio = (
+        sum(reliability_flags) / len(reliability_flags) if reliability_flags else 0.0
+    )
 
     def to_level(r: float) -> str:
         if r >= 0.75:
@@ -544,16 +554,20 @@ def render_disclosure_matrix(quality: Dict[str, Any]):
 
     rows_html = ""
     for rel in reversed(levels):
-        row_cells = f'<td style="font-weight:600;padding:6px 10px;white-space:nowrap;">{rel} reliability</td>'
+        row_cells = (
+            f'<td style="font-weight:600;padding:6px 10px;white-space:nowrap;">{rel} reliability</td>'
+        )
         for comp in levels:
             risk_label, bg_color = risk_map[(rel, comp)]
-            is_company_cell = (rel == reliability_level and comp == completeness_level)
+            is_company_cell = (
+                rel == reliability_level and comp == completeness_level
+            )
             border = "2px solid #000" if is_company_cell else "1px solid #dddddd"
             marker = "⬤ " if is_company_cell else ""
             row_cells += (
                 f'<td style="border:{border};background-color:{bg_color};'
                 f'padding:6px 10px;text-align:center;color:#ffffff;font-weight:600;">'
-                f'{marker}{risk_label}</td>'
+                f"{marker}{risk_label}</td>"
             )
         rows_html += f"<tr>{row_cells}</tr>"
 
@@ -582,6 +596,7 @@ def render_disclosure_matrix(quality: Dict[str, Any]):
 
 
 # --------- SUMMARY GENERATION ---------
+
 
 def generate_summary(
     llm: ChatOpenAI,
@@ -677,32 +692,54 @@ Keep the entire report under 600 words. Use clear, professional language. Quote 
     )
 
     chain = prompt | llm
-    resp = chain.invoke({
-        "payload_json": json.dumps(payload, indent=2),
-        "f_score": f_score,
-        "s_score": s_score,
-        "f_norm": f_score_normalized,
-        "s_norm": s_score_normalized
-    })
+    resp = chain.invoke(
+        {
+            "payload_json": json.dumps(payload, indent=2),
+            "f_score": f_score,
+            "s_score": s_score,
+            "f_norm": f_score_normalized,
+            "s_norm": s_score_normalized,
+        }
+    )
     return resp.content.strip()
 
 
 # --------- STREAMLIT APP ---------
 
+
 def main():
     st.set_page_config(
         page_title="Automotive ESG Analyzer",
         page_icon="🚗",
-        layout="wide"
+        layout="wide",
     )
 
     st.title("🚗 Automotive Company Financial & Sustainability Analyzer")
-    st.markdown("""
+    st.markdown(
+        """
     Upload financial and/or sustainability reports (PDF format) to get comprehensive analysis with:
     - **Financial scoring** (0-16 points across 8 indicators)
     - **Sustainability scoring** (0-15 points across 15 automotive-specific indicators)
     - **Detailed investor summary** with strengths, weaknesses, and risk factors
-    """)
+    """
+    )
+
+    st.divider()
+
+    # API Key Input
+    st.subheader("🔑 OpenAI API Key")
+    api_key_input = st.text_input(
+        "Enter your OpenAI API key",
+        type="password",
+        help="Your API key is used only for this session and is not stored anywhere.",
+        placeholder="sk-...",
+    )
+
+    if not api_key_input:
+        st.info(
+            "👆 Please enter your OpenAI API key to continue. You can get one from https://platform.openai.com/api-keys"
+        )
+        st.stop()
 
     st.divider()
 
@@ -715,7 +752,7 @@ def main():
             "Upload Annual Report / 10-K",
             type=["pdf"],
             key="financial",
-            help="Upload the company's financial report (annual report, 10-K, etc.)"
+            help="Upload the company's financial report (annual report, 10-K, etc.)",
         )
 
     with col2:
@@ -724,7 +761,7 @@ def main():
             "Upload ESG / Sustainability Report",
             type=["pdf"],
             key="sustainability",
-            help="Upload the company's sustainability or ESG report"
+            help="Upload the company's sustainability or ESG report",
         )
 
     st.divider()
@@ -733,230 +770,275 @@ def main():
     if st.button("🔍 Analyze Reports", type="primary", use_container_width=True):
         if not financial_file and not sustainability_file:
             st.error("⚠️ Please upload at least one report to analyze.")
-            return
+        else:
+            fi = None
+            si = None
+            f_score = 0
+            s_score = 0
+            f_score_normalized = 0
+            s_score_normalized = 0
 
-        fi = None
-        si = None
-        f_score = 0
-        s_score = 0
-        f_score_normalized = 0
-        s_score_normalized = 0
+            try:
+                # Separate LLMs: JSON one for extraction, text one for summary
+                llm_text = get_llm(api_key_input)
+                llm_json = get_json_llm(api_key_input)
 
-        try:
-            # Separate LLMs: JSON one for extraction, text one for summary
-            llm_text = get_llm()
-            llm_json = get_json_llm()
+                # Process financial report (Pattern A: targeted retrieval + non-RAG scoring)
+                if financial_file:
+                    with st.spinner("📊 Analyzing financial report..."):
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".pdf"
+                        ) as tmp_file:
+                            tmp_file.write(financial_file.read())
+                            financial_path = tmp_file.name
 
-            # Process financial report (Pattern A: targeted retrieval + non-RAG scoring)
-            if financial_file:
-                with st.spinner("📊 Analyzing financial report..."):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                        tmp_file.write(financial_file.read())
-                        financial_path = tmp_file.name
+                        financial_vs = build_vectorstore_from_pdf(
+                            financial_path, api_key_input
+                        )
 
-                    financial_vs = build_vectorstore_from_pdf(financial_path)
+                        income_context = retrieve_context(
+                            "consolidated statements of operations income statement net sales revenue gross profit cost of sales cost of revenue net income",
+                            financial_vs,
+                            k=8,
+                        )
+                        balance_context = retrieve_context(
+                            "consolidated balance sheets inventory total assets current assets total liabilities shareholders equity",
+                            financial_vs,
+                            k=8,
+                        )
+                        cashflow_context = retrieve_context(
+                            "consolidated statements of cash flows cash flow from operations capital expenditures additions to property plant and equipment free cash flow",
+                            financial_vs,
+                            k=8,
+                        )
+                        mdna_context = retrieve_context(
+                            "management discussion and analysis revenue growth year over year margin trends operating margin ebitda",
+                            financial_vs,
+                            k=6,
+                        )
 
-                    income_context = retrieve_context(
-                        "consolidated statements of operations income statement net sales revenue gross profit cost of sales cost of revenue net income",
-                        financial_vs,
-                        k=8,
-                    )
-                    balance_context = retrieve_context(
-                        "consolidated balance sheets inventory total assets current assets total liabilities shareholders equity",
-                        financial_vs,
-                        k=8,
-                    )
-                    cashflow_context = retrieve_context(
-                        "consolidated statements of cash flows cash flow from operations capital expenditures additions to property plant and equipment free cash flow",
-                        financial_vs,
-                        k=8,
-                    )
-                    mdna_context = retrieve_context(
-                        "management discussion and analysis revenue growth year over year margin trends operating margin ebitda",
-                        financial_vs,
-                        k=6,
-                    )
+                        financial_context = "\n\n".join(
+                            [
+                                "# INCOME STATEMENT SECTION\n",
+                                income_context,
+                                "\n\n# BALANCE SHEET SECTION\n",
+                                balance_context,
+                                "\n\n# CASH FLOW / CAPEX / FCF SECTION\n",
+                                cashflow_context,
+                                "\n\n# MD&A / NARRATIVE TRENDS SECTION\n",
+                                mdna_context,
+                            ]
+                        )
 
-                    financial_context = "\n\n".join(
-                        [
-                            "# INCOME STATEMENT SECTION\n",
-                            income_context,
-                            "\n\n# BALANCE SHEET SECTION\n",
-                            balance_context,
-                            "\n\n# CASH FLOW / CAPEX / FCF SECTION\n",
-                            cashflow_context,
-                            "\n\n# MD&A / NARRATIVE TRENDS SECTION\n",
-                            mdna_context,
-                        ]
-                    )
+                        fi = extract_financial_indicators(llm_json, financial_context)
+                        f_score = compute_financial_score(fi)
+                        f_score_normalized = (f_score / 16) * 10
 
-                    fi = extract_financial_indicators(llm_json, financial_context)
-                    f_score = compute_financial_score(fi)
-                    f_score_normalized = (f_score / 16) * 10
+                        # Store vector store in session state for chat RAG
+                        st.session_state["financial_vectorstore"] = financial_vs
 
-                    # Store vector store in session state for chat RAG
-                    st.session_state['financial_vectorstore'] = financial_vs
+                        os.unlink(financial_path)
 
-                    os.unlink(financial_path)
+                    st.success("✅ Financial analysis complete!")
 
-                st.success("✅ Financial analysis complete!")
+                # Process sustainability report (RAG)
+                if sustainability_file:
+                    with st.spinner("🌱 Analyzing sustainability report..."):
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".pdf"
+                        ) as tmp_file:
+                            tmp_file.write(sustainability_file.read())
+                            sustainability_path = tmp_file.name
 
-            # Process sustainability report (RAG)
-            if sustainability_file:
-                with st.spinner("🌱 Analyzing sustainability report..."):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                        tmp_file.write(sustainability_file.read())
-                        sustainability_path = tmp_file.name
+                        sustainability_vs = build_vectorstore_from_pdf(
+                            sustainability_path, api_key_input
+                        )
+                        si = extract_sustainability_indicators(
+                            llm_json, sustainability_vs
+                        )
+                        s_score = compute_sustainability_score(si)
+                        s_score_normalized = (s_score / 15) * 10
 
-                    sustainability_vs = build_vectorstore_from_pdf(sustainability_path)
-                    si = extract_sustainability_indicators(llm_json, sustainability_vs)
-                    s_score = compute_sustainability_score(si)
-                    s_score_normalized = (s_score / 15) * 10
+                        # Store vector store in session state for chat RAG
+                        st.session_state["sustainability_vectorstore"] = (
+                            sustainability_vs
+                        )
 
-                    # Store vector store in session state for chat RAG
-                    st.session_state['sustainability_vectorstore'] = sustainability_vs
+                        os.unlink(sustainability_path)
 
-                    os.unlink(sustainability_path)
+                    st.success("✅ Sustainability analysis complete!")
 
-                st.success("✅ Sustainability analysis complete!")
+                # Calculate overall score
+                if financial_file and sustainability_file:
+                    overall = (f_score_normalized + s_score_normalized) / 2
+                elif financial_file:
+                    overall = f_score_normalized
+                elif sustainability_file:
+                    overall = s_score_normalized
+                else:
+                    overall = 0
 
-            # Calculate overall score
-            if financial_file and sustainability_file:
-                overall = (f_score_normalized + s_score_normalized) / 2
-            elif financial_file:
-                overall = f_score_normalized
-            elif sustainability_file:
-                overall = s_score_normalized
+                # Generate investor summary if both reports available
+                if fi and si:
+                    with st.spinner("📝 Generating comprehensive investor summary..."):
+                        summary = generate_summary(
+                            llm_text, f_score, s_score, fi, si
+                        )
+                else:
+                    summary = None
+
+                # Store analysis results in session state for persistence and chat
+                st.session_state["analysis_complete"] = True
+                st.session_state["financial_indicators"] = fi
+                st.session_state["sustainability_indicators"] = si
+                st.session_state["financial_score"] = f_score
+                st.session_state["financial_score_normalized"] = f_score_normalized
+                st.session_state["sustainability_score"] = s_score
+                st.session_state["sustainability_score_normalized"] = (
+                    s_score_normalized
+                )
+                st.session_state["overall_score"] = overall
+                st.session_state["investor_summary"] = summary
+
+            except Exception as e:
+                st.error(f"❌ Error during analysis: {str(e)}")
+                st.exception(e)
+
+    # Display results (outside button block, based on session state)
+    if st.session_state.get("analysis_complete", False):
+        fi = st.session_state.get("financial_indicators")
+        si = st.session_state.get("sustainability_indicators")
+        f_score = st.session_state.get("financial_score", 0)
+        f_score_normalized = st.session_state.get(
+            "financial_score_normalized", 0
+        )
+        s_score = st.session_state.get("sustainability_score", 0)
+        s_score_normalized = st.session_state.get(
+            "sustainability_score_normalized", 0
+        )
+        overall = st.session_state.get("overall_score", 0)
+        summary = st.session_state.get("investor_summary")
+
+        st.divider()
+
+        # Display scores
+        st.header("📈 Scores")
+
+        score_col1, score_col2, score_col3 = st.columns(3)
+
+        with score_col1:
+            if fi:
+                st.metric(
+                    "Financial Score",
+                    f"{f_score}/16",
+                    f"{f_score_normalized:.1f}/10 normalized",
+                )
             else:
-                overall = 0
+                st.metric("Financial Score", "N/A", "No report uploaded")
 
+        with score_col2:
+            if si:
+                st.metric(
+                    "Sustainability Score",
+                    f"{s_score}/15",
+                    f"{s_score_normalized:.1f}/10 normalized",
+                )
+            else:
+                st.metric("Sustainability Score", "N/A", "No report uploaded")
+
+        with score_col3:
+            if fi or si:
+                st.metric(
+                    "Overall Score",
+                    f"{overall:.1f}/10",
+                    delta=None,
+                )
+            else:
+                st.metric("Overall Score", "N/A", "No reports uploaded")
+
+        # Detailed breakdown
+        if fi or si:
             st.divider()
 
-            # Display scores
-            st.header("📈 Scores")
+            detail_col1, detail_col2 = st.columns(2)
 
-            score_col1, score_col2, score_col3 = st.columns(3)
-
-            with score_col1:
+            with detail_col1:
                 if fi:
-                    st.metric(
-                        "Financial Score",
-                        f"{f_score}/16",
-                        f"{f_score_normalized:.1f}/10 normalized"
+                    st.subheader("💰 Financial Breakdown")
+                    st.markdown(
+                        f"""
+                    - **Revenue Growth:** {fi.revenue_growth_score if fi.revenue_growth_score is not None else 'N/A'} / 2
+                    - **Gross Margin:** {fi.gross_margin_score if fi.gross_margin_score is not None else 'N/A'} / 2
+                    - **Operating Margin:** {fi.operating_margin_score if fi.operating_margin_score is not None else 'N/A'} / 2
+                    - **EBITDA Margin:** {fi.ebitda_margin_score if fi.ebitda_margin_score is not None else 'N/A'} / 2
+                    - **Free Cash Flow:** {fi.fcf_score if fi.fcf_score is not None else 'N/A'} / 2
+                    - **CapEx % of Revenue:** {fi.capex_score if fi.capex_score is not None else 'N/A'} / 2
+                    - **R&D % of Revenue:** {fi.rnd_score if fi.rnd_score is not None else 'N/A'} / 2
+                    - **Inventory/DIO:** {fi.inventory_score if fi.inventory_score is not None else 'N/A'} / 2
+                    """
                     )
-                else:
-                    st.metric("Financial Score", "N/A", "No report uploaded")
 
-            with score_col2:
+            with detail_col2:
                 if si:
-                    st.metric(
-                        "Sustainability Score",
-                        f"{s_score}/15",
-                        f"{s_score_normalized:.1f}/10 normalized"
+                    st.subheader("🌍 Sustainability Breakdown")
+                    st.markdown(
+                        f"""
+                    - **GHG Emissions:** {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4
+                    - **Automotive Targets:** {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4
+                    - **Transparency:** {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3
+                    - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4
+                    """
                     )
-                else:
-                    st.metric("Sustainability Score", "N/A", "No report uploaded")
 
-            with score_col3:
-                if fi or si:
-                    st.metric(
-                        "Overall Score",
-                        f"{overall:.1f}/10",
-                        delta=None
-                    )
-                else:
-                    st.metric("Overall Score", "N/A", "No reports uploaded")
-
-            # Detailed breakdown
-            if fi or si:
+            if si:
                 st.divider()
+                st.subheader("🧭 Disclosure Quality Risk View")
+                quality = compute_disclosure_quality(si)
+                render_disclosure_matrix(quality)
 
-                detail_col1, detail_col2 = st.columns(2)
+        # Investor summary
+        if summary:
+            st.divider()
+            st.header("📄 Investor Summary")
+            st.markdown(summary)
 
-                with detail_col1:
-                    if fi:
-                        st.subheader("💰 Financial Breakdown")
-                        st.markdown(f"""
-                        - **Revenue Growth:** {fi.revenue_growth_score if fi.revenue_growth_score is not None else 'N/A'} / 2  
-                        - **Gross Margin:** {fi.gross_margin_score if fi.gross_margin_score is not None else 'N/A'} / 2  
-                        - **Operating Margin:** {fi.operating_margin_score if fi.operating_margin_score is not None else 'N/A'} / 2  
-                        - **EBITDA Margin:** {fi.ebitda_margin_score if fi.ebitda_margin_score is not None else 'N/A'} / 2  
-                        - **Free Cash Flow:** {fi.fcf_score if fi.fcf_score is not None else 'N/A'} / 2  
-                        - **CapEx % of Revenue:** {fi.capex_score if fi.capex_score is not None else 'N/A'} / 2  
-                        - **R&D % of Revenue:** {fi.rnd_score if fi.rnd_score is not None else 'N/A'} / 2  
-                        - **Inventory/DIO:** {fi.inventory_score if fi.inventory_score is not None else 'N/A'} / 2  
-                        """)
+            st.download_button(
+                label="📥 Download Summary as Text",
+                data=summary,
+                file_name="investor_summary.txt",
+                mime="text/plain",
+            )
+        elif fi and not si:
+            st.info(
+                "💡 Upload a sustainability report to generate a comprehensive investor summary."
+            )
+        elif si and not fi:
+            st.info(
+                "💡 Upload a financial report to generate a comprehensive investor summary."
+            )
 
-                with detail_col2:
-                    if si:
-                        st.subheader("🌍 Sustainability Breakdown")
-                        st.markdown(f"""
-                        - **GHG Emissions:** {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4  
-                        - **Automotive Targets:** {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4  
-                        - **Transparency:** {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3  
-                        - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4  
-                        """)
-
+        if fi or si:
+            st.divider()
+            with st.expander("🔍 View Raw Indicators (Debug)"):
+                if fi:
+                    st.subheader("Financial Indicators")
+                    st.json(fi.__dict__)
                 if si:
-                    st.divider()
-                    st.subheader("🧭 Disclosure Quality Risk View")
-                    quality = compute_disclosure_quality(si)
-                    render_disclosure_matrix(quality)
-
-            # Investor summary
-            if fi and si:
-                st.divider()
-                with st.spinner("📝 Generating comprehensive investor summary..."):
-                    summary = generate_summary(llm_text, f_score, s_score, fi, si)
-
-                st.header("📄 Investor Summary")
-                st.markdown(summary)
-
-                st.download_button(
-                    label="📥 Download Summary as Text",
-                    data=summary,
-                    file_name="investor_summary.txt",
-                    mime="text/plain"
-                )
-            elif fi:
-                st.info("💡 Upload a sustainability report to generate a comprehensive investor summary.")
-            elif si:
-                st.info("💡 Upload a financial report to generate a comprehensive investor summary.")
-
-            if fi or si:
-                st.divider()
-                with st.expander("🔍 View Raw Indicators (Debug)"):
-                    if fi:
-                        st.subheader("Financial Indicators")
-                        st.json(fi.__dict__)
-                    if si:
-                        st.subheader("Sustainability Indicators")
-                        st.json(si.__dict__)
-
-            # Store analysis results in session state for chat
-            if fi or si:
-                st.session_state['analysis_complete'] = True
-                st.session_state['financial_indicators'] = fi
-                st.session_state['sustainability_indicators'] = si
-                st.session_state['financial_score'] = f_score
-                st.session_state['sustainability_score'] = s_score
-                st.session_state['overall_score'] = overall
-                st.session_state['investor_summary'] = summary if (fi and si) else None
-
-        except Exception as e:
-            st.error(f"❌ Error during analysis: {str(e)}")
-            st.exception(e)
+                    st.subheader("Sustainability Indicators")
+                    st.json(si.__dict__)
 
     # Conversational Chat Interface - Right sidebar
-    if st.session_state.get('analysis_complete', False):
+    if st.session_state.get("analysis_complete", False):
         # Initialize chat state
-        if 'chat_history' not in st.session_state:
+        if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
 
         # Use sidebar for chat
         with st.sidebar:
             st.markdown("### 💬 Analysis Assistant")
-            st.markdown("Ask questions about the analysis or search the original reports.")
+            st.markdown(
+                "Ask questions about the analysis or search the original reports."
+            )
             st.divider()
 
             # Display chat history
@@ -967,56 +1049,186 @@ def main():
                         st.markdown(message["content"])
 
             # Chat input
-            user_question = st.chat_input("Ask a question...", key="chat_input_sidebar")
+            user_question = st.chat_input(
+                "Ask a question...", key="chat_input_sidebar"
+            )
 
             if user_question:
                 # Add user message
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
+                st.session_state.chat_history.append(
+                    {"role": "user", "content": user_question}
+                )
 
                 # Prepare context
-                fi = st.session_state.get('financial_indicators')
-                si = st.session_state.get('sustainability_indicators')
-                summary = st.session_state.get('investor_summary')
-                f_vs = st.session_state.get('financial_vectorstore')
-                s_vs = st.session_state.get('sustainability_vectorstore')
+                fi = st.session_state.get("financial_indicators")
+                si = st.session_state.get("sustainability_indicators")
+                summary = st.session_state.get("investor_summary")
+                f_vs = st.session_state.get("financial_vectorstore")
+                s_vs = st.session_state.get("sustainability_vectorstore")
+
+                # --------- INTENT DETECTION ---------
+                q_lower = user_question.lower()
+
+                # Terms that indicate the user is asking about the financial indicators
+                financial_indicator_terms = [
+                    "revenue",
+                    "revenue growth",
+                    "sales",
+                    "top line",
+                    "gross margin",
+                    "gross profit",
+                    "operating margin",
+                    "operating income",
+                    "operating loss",
+                    "ebitda",
+                    "ebitda margin",
+                    "net income",
+                    "net margin",
+                    "free cash flow",
+                    "fcf",
+                    "capex",
+                    "capital expenditure",
+                    "r&d",
+                    "research and development",
+                    "inventory",
+                    "dio",
+                    "days inventory outstanding",
+                    "leverage",
+                    "debt",
+                    "net debt",
+                    "interest coverage",
+                ]
+
+                is_financial_indicator_question = any(
+                    term in q_lower for term in financial_indicator_terms
+                )
+
+                # "Why / explain / driver / cause" style questions
+                is_explanation_question = any(
+                    kw in q_lower
+                    for kw in [
+                        "why",
+                        "how",
+                        "explain",
+                        "driver",
+                        "cause",
+                        "because",
+                        "due to",
+                        "reason",
+                    ]
+                )
 
                 # Check if question needs RAG retrieval
-                needs_rag = any(keyword in user_question.lower() for keyword in [
-                    'report', 'document', 'says', 'mention', 'find', 'search',
-                    'look for', 'does it say', 'what about', 'show me', 'tell me about'
-                ])
+                needs_rag = any(
+                    keyword in q_lower
+                    for keyword in [
+                        "report",
+                        "document",
+                        "says",
+                        "mention",
+                        "find",
+                        "search",
+                        "look for",
+                        "does it say",
+                        "what about",
+                        "show me",
+                        "tell me about",
+                    ]
+                ) or is_financial_indicator_question or is_explanation_question
 
-                # Build context
+                # --------- BUILD BASE CONTEXT (ALWAYS INCLUDE ANALYSIS) ---------
                 context_parts = []
 
                 # Always include extracted indicators
                 if fi:
-                    context_parts.append(f"Financial Analysis (Score: {st.session_state.get('financial_score')}/16):\n{json.dumps(fi.__dict__, indent=2)}")
+                    context_parts.append(
+                        f"Financial Analysis (Score {st.session_state.get('financial_score')}/16):\n"
+                        f"{json.dumps(fi.__dict__, indent=2)}"
+                    )
                 if si:
-                    context_parts.append(f"Sustainability Analysis (Score: {st.session_state.get('sustainability_score')}/15):\n{json.dumps(si.__dict__, indent=2)}")
+                    context_parts.append(
+                        f"Sustainability Analysis (Score {st.session_state.get('sustainability_score')}/15):\n"
+                        f"{json.dumps(si.__dict__, indent=2)}"
+                    )
                 if summary:
                     context_parts.append(f"Investor Summary:\n{summary}")
 
-                # Add RAG context if needed
+                # --------- RAG CONTEXT (FINANCIAL STATEMENTS + MD&A/NOTES) ---------
                 rag_context = ""
-                if needs_rag:
+                if needs_rag and (f_vs or s_vs):
                     rag_parts = []
+
                     if f_vs:
-                        financial_docs = retrieve_context(user_question, f_vs, k=5)
-                        rag_parts.append(f"FINANCIAL REPORT EXCERPTS:\n{financial_docs}")
+                        # For any question about financial indicators or explanations,
+                        # explicitly pull both: (1) financial statements, (2) MD&A / notes,
+                        # PLUS (3) question-matched chunks.
+                        if is_financial_indicator_question or is_explanation_question:
+                            fin_stmt_query = (
+                                "consolidated statements of operations income statement "
+                                "revenue net sales cost of sales cost of goods sold gross profit "
+                                "research and development selling general and administrative "
+                                "operating income operating loss operating margin "
+                                "depreciation amortization restructuring impairment "
+                                "capital expenditures capital expenditure additions to property plant and equipment "
+                                "cash flow statement cash flows from operating activities free cash flow"
+                            )
+
+                            mdna_query = (
+                                "management discussion and analysis results of operations "
+                                "operating performance margin drivers cost structure "
+                                "revenue growth drivers gross margin drivers operating income drivers "
+                                "free cash flow drivers capital expenditures investments "
+                                "notes to the consolidated financial statements "
+                                "impairment restructuring warranty provisions inventory write-downs "
+                                "significant charges or one-time items"
+                            )
+
+                            financial_docs = "\n\n".join(
+                                [
+                                    "FINANCIAL STATEMENTS EXCERPTS:\n"
+                                    + retrieve_context(
+                                        fin_stmt_query, f_vs, k=6
+                                    ),
+                                    "MD&A / NOTES EXCERPTS:\n"
+                                    + retrieve_context(
+                                        mdna_query, f_vs, k=6
+                                    ),
+                                    "QUESTION-MATCHED EXCERPTS:\n"
+                                    + retrieve_context(
+                                        user_question, f_vs, k=4
+                                    ),
+                                ]
+                            )
+                        else:
+                            # Default retrieval if it's not clearly an indicator/explanation question
+                            financial_docs = retrieve_context(
+                                user_question, f_vs, k=5
+                            )
+
+                        rag_parts.append(
+                            f"FINANCIAL REPORT EXCERPTS:\n{financial_docs}"
+                        )
+
                     if s_vs:
-                        sustainability_docs = retrieve_context(user_question, s_vs, k=5)
-                        rag_parts.append(f"SUSTAINABILITY REPORT EXCERPTS:\n{sustainability_docs}")
+                        sustainability_docs = retrieve_context(
+                            user_question, s_vs, k=5
+                        )
+                        rag_parts.append(
+                            f"SUSTAINABILITY REPORT EXCERPTS:\n{sustainability_docs}"
+                        )
+
                     rag_context = "\n\n".join(rag_parts)
 
                 analysis_context = "\n\n".join(context_parts)
 
-                # Build conversation history
+                # --------- CONVERSATION HISTORY ---------
                 conversation_history = ""
                 for msg in st.session_state.chat_history[:-1]:
-                    conversation_history += f"{msg['role'].upper()}: {msg['content']}\n\n"
+                    conversation_history += (
+                        f"{msg['role'].upper()}: {msg['content']}\n\n"
+                    )
 
-                # Create prompt
+                # --------- PROMPT (RAG vs NON-RAG) ---------
                 if needs_rag and rag_context:
                     chat_prompt = ChatPromptTemplate.from_template(
                         """
@@ -1033,25 +1245,44 @@ CONVERSATION HISTORY:
 
 USER QUESTION: {user_question}
 
-Provide a helpful, concise answer. Use specific numbers and quotes from BOTH the analysis results AND the document excerpts when relevant. If the information isn't available in either source, say so clearly.
+Provide a helpful, concise answer grounded in the excerpts above.
 
-Keep responses focused and professional. Use markdown formatting for clarity.
+If the user is asking **why** a financial metric (such as revenue growth, gross margin, operating margin, EBITDA margin, net income, free cash flow, CapEx, R&D, inventory, leverage, etc.) is high/low/negative/positive, or asking you to **explain** a specific financial indicator, you MUST:
+
+1) Use the financial statement excerpts to identify the **specific line items** that drive that metric
+   (for example: revenue changes, cost of sales, research and development, selling, general and administrative expense,
+   impairments, restructuring charges, warranty provisions, inventory write-downs, capital expenditures, interest expense).
+   Quantify them where possible.
+
+2) Then use the Management's Discussion and Analysis and Notes to the Consolidated Financial Statements excerpts
+   to summarize any **explicit explanations from management** (for example: restructuring programs, impairments, product
+   launches, pricing changes, volume/mix effects, input cost inflation).
+
+3) Clearly connect these drivers back to the user's question, e.g.:
+   "Operating margins are so negative primarily because of X, Y, and Z charges in 2024..."
+
+If the information is not available in the excerpts, say so clearly and explain what seems to be missing.
+
+Keep responses focused and professional. Use markdown formatting where helpful (short headings or bullet points).
                         """
                     )
-                    llm_chat = get_llm()
+                    llm_chat = get_llm(api_key_input)
                     chain = chat_prompt | llm_chat
-                    response = chain.invoke({
-                        "analysis_context": analysis_context,
-                        "rag_context": rag_context,
-                        "conversation_history": conversation_history,
-                        "user_question": user_question
-                    })
+                    response = chain.invoke(
+                        {
+                            "analysis_context": analysis_context,
+                            "rag_context": rag_context,
+                            "conversation_history": conversation_history,
+                            "user_question": user_question,
+                        }
+                    )
                 else:
+                    # Fallback: answer based only on extracted analysis results and summary
                     chat_prompt = ChatPromptTemplate.from_template(
                         """
 You are an expert financial and ESG analyst helping an investor understand their automotive company analysis.
 
-ANALYSIS RESULTS:
+EXTRACTED ANALYSIS RESULTS:
 {analysis_context}
 
 CONVERSATION HISTORY:
@@ -1059,27 +1290,38 @@ CONVERSATION HISTORY:
 
 USER QUESTION: {user_question}
 
-Provide a helpful, concise answer based on the analysis results. Use specific numbers and evidence from the analysis when relevant. If the question requires information from the original reports that wasn't extracted, suggest the user rephrase their question to search the documents.
+Provide a helpful, concise answer based on the analysis results above. Use specific numbers from the analysis when relevant.
 
-Keep responses focused and professional. Use markdown formatting for clarity.
+If the question requires information that would only appear in the original report text
+(for example, detailed explanations in MD&A/notes), state clearly that you would need
+to look at the report text and invite the user to re-ask the question in a way that
+references the report so it can be retrieved.
                         """
                     )
-                    llm_chat = get_llm()
+                    llm_chat = get_llm(api_key_input)
                     chain = chat_prompt | llm_chat
-                    response = chain.invoke({
-                        "analysis_context": analysis_context,
-                        "conversation_history": conversation_history,
-                        "user_question": user_question
-                    })
+                    response = chain.invoke(
+                        {
+                            "analysis_context": analysis_context,
+                            "conversation_history": conversation_history,
+                            "user_question": user_question,
+                        }
+                    )
 
-                assistant_response = response.content.strip()
-                st.session_state.chat_history.append({"role": "assistant", "content": assistant_response})
+                # Add assistant response to chat history
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": response.content}
+                )
                 st.rerun()
 
             # Clear chat button
             st.divider()
             if st.session_state.chat_history:
-                if st.button("🗑️ Clear Chat History", key="clear_chat_sidebar", use_container_width=True):
+                if st.button(
+                    "🗑️ Clear Chat History",
+                    key="clear_chat_sidebar",
+                    use_container_width=True,
+                ):
                     st.session_state.chat_history = []
                     st.rerun()
 
