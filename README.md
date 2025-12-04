@@ -80,7 +80,7 @@ This tool has been customized to assess **automotive manufacturers** specificall
 
 **Why this matters:** Low DIO indicates efficient inventory management and reduced risk of obsolescence as the industry rapidly shifts from ICE to EV vehicles.
 
-### Sustainability Indicators (15 points → normalized to 10)
+### Sustainability Indicators (16 points → normalized to 10)
 
 #### 1. GHG Emissions Reporting (4 points)
 - ✓ Scope 1 emissions reported with numeric values
@@ -119,13 +119,14 @@ This tool has been customized to assess **automotive manufacturers** specificall
 
 ---
 
-#### 4. Environmental & Compliance Metrics (4 points)
+#### 4. Environmental & Compliance Metrics (5 points)
 - ✓ Water usage metrics disclosed
 - ✓ Hazardous waste metrics disclosed
 - ✓ Regulatory fines/violations disclosed
 - ✓ Supplier audit frequency mentioned
+- ✓ Product recalls (safety/environmental) or worker/plant incidents disclosed
 
-**Why this matters:** These operational metrics reveal environmental management maturity and regulatory compliance beyond just carbon emissions.
+**Why this matters:** These operational metrics reveal environmental management maturity and regulatory compliance beyond just carbon emissions. Product recalls and workplace incidents demonstrate transparency around operational risks.
 
 ---
 
@@ -142,11 +143,11 @@ This tool has been customized to assess **automotive manufacturers** specificall
 **Sustainability Analysis:**
 The tool uses **3 separate retrieval queries** to ensure comprehensive coverage:
 
-1. **GHG Query** – Scope 1/2/3 emissions and year-on-year changes  
-2. **Automotive Transition Query** – EV production, battery recycling, ICE phase-out, supply-chain traceability  
-3. **Quality & Compliance Query** – sustainability claims, water usage, hazardous waste, regulatory fines, supplier audits  
+1. **GHG Query** – Scope 1/2/3 emissions and year-on-year changes
+2. **Automotive Transition Query** – EV production, battery recycling, ICE phase-out, supply-chain traceability
+3. **Quality & Compliance Query** – sustainability claims, water usage, hazardous waste, regulatory fines, supplier audits, product recalls, safety incidents, worker safety
 
-All retrieved contexts are combined before analysis so the LLM has the relevant evidence for all **15 sustainability criteria**.
+All retrieved contexts are combined before analysis so the LLM has the relevant evidence for all **16 sustainability criteria**.
 
 
 ---
@@ -165,11 +166,11 @@ Financial score: X / 16 (normalized: Y / 10)
   - R&D % of Revenue: G / 2
   - Inventory/DIO: H / 2
 
-Sustainability score: Z / 15 (normalized: W / 10)
+Sustainability score: Z / 16 (normalized: W / 10)
   - GHG Emissions: I / 4
   - Automotive Targets: J / 4
   - Transparency: K / 3
-  - Environmental/Compliance: L / 4
+  - Environmental/Compliance: L / 5
 
 Overall score: M / 10
 ```
@@ -180,7 +181,7 @@ Tailored to automotive industry with focus on:
 - **GHG emissions transparency:** Scope 1/2/3 reporting and year-over-year trends
 - **EV transition readiness:** Production targets, battery recycling, ICE phase-out timelines
 - **Greenwashing detection:** Specificity of claims, supporting evidence, avoidance of excessive self-praise
-- **Environmental compliance:** Water usage, hazardous waste, regulatory fines, supplier audits
+- **Environmental compliance:** Water usage, hazardous waste, regulatory fines, supplier audits, product recalls and worker safety incidents
 - **Overall readiness:** Comprehensive assessment for automotive industry transition
 
 ---
@@ -219,7 +220,7 @@ streamlit run app.py
 
 This will open a web interface in your browser where you can:
 - Upload financial and/or sustainability reports via drag-and-drop
-- View interactive scores and breakdowns (Financial: 0-16 points, Sustainability: 0-15 points)
+- View interactive scores and breakdowns (Financial: 0-16 points, Sustainability: 0-16 points)
 - See a visual disclosure quality matrix showing greenwashing risk
 - Download the investor summary as a text file
 - **Ask questions via chat assistant** - Right sidebar chat with RAG-enabled Q&A

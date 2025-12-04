@@ -78,6 +78,10 @@ class SustainabilityIndicators:
     fines_evidence: str
     supplier_audit_frequency: bool
     audit_evidence: str
+    product_recalls_reported: bool
+    product_recalls_evidence: str
+    worker_incidents_reported: bool
+    worker_incidents_evidence: str
 
 
 # --------- RAG HELPERS (for financial + sustainability) ---------
@@ -302,7 +306,7 @@ def extract_sustainability_indicators(llm: ChatOpenAI, vs: FAISS) -> Sustainabil
     )
 
     quality_context = retrieve_context(
-        "Sustainability claims, net-zero commitments, water usage, hazardous waste, regulatory fines, supplier audits",
+        "Sustainability claims, net-zero commitments, water usage, hazardous waste, regulatory fines, supplier audits, product recalls, safety incidents, worker safety, plant incidents, environmental harm",
         vs,
         k=8,
     )
@@ -355,8 +359,12 @@ Return a STRICT JSON object with exactly these keys and types:
 - fines_evidence: string
 - supplier_audit_frequency: true if supplier audit frequency is mentioned
 - audit_evidence: string
+- product_recalls_reported: true if product recalls related to safety or environmental performance are mentioned
+- product_recalls_evidence: string (brief description of any recalls, or "No product recalls mentioned" if none found)
+- worker_incidents_reported: true if worker/factory/plant incidents related to environmental harm are mentioned
+- worker_incidents_evidence: string (brief description of any incidents, or "No worker incidents mentioned" if none found)
 
-The output MUST be valid JSON with all 24 fields. For example:
+The output MUST be valid JSON with all 28 fields. For example:
 
 {{
   "ghg_scope1_reported": true,
@@ -405,6 +413,10 @@ ONLY output the JSON object, no extra text.
         fines_evidence=data["fines_evidence"],
         supplier_audit_frequency=data["supplier_audit_frequency"],
         audit_evidence=data["audit_evidence"],
+        product_recalls_reported=data["product_recalls_reported"],
+        product_recalls_evidence=data["product_recalls_evidence"],
+        worker_incidents_reported=data["worker_incidents_reported"],
+        worker_incidents_evidence=data["worker_incidents_evidence"],
     )
 
 
@@ -434,7 +446,7 @@ def compute_financial_score(fi: FinancialIndicators) -> int:
 
 
 def compute_sustainability_score(si: SustainabilityIndicators) -> int:
-    """Sum all sustainability indicator scores. Maximum: 15 points."""
+    """Sum all sustainability indicator scores. Maximum: 17 points."""
     score = 0
 
     # Category 1: GHG Emissions (4 points)
@@ -465,7 +477,7 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
     if si.avoids_excessive_self_praise:
         score += 1
 
-    # Category 4: Environmental & Compliance (4 points)
+    # Category 4: Environmental & Compliance (6 points)
     if si.water_usage_reported:
         score += 1
     if si.hazardous_waste_reported:
@@ -473,6 +485,12 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
     if si.regulatory_fines_disclosed:
         score += 1
     if si.supplier_audit_frequency:
+        score += 1
+    # Inverted scoring: No recalls = +1 point (recalls are BAD)
+    if not si.product_recalls_reported:
+        score += 1
+    # Inverted scoring: No worker incidents = +1 point (incidents are BAD)
+    if not si.worker_incidents_reported:
         score += 1
 
     return score
@@ -498,6 +516,8 @@ def compute_disclosure_quality(si: SustainabilityIndicators) -> Dict[str, Any]:
         si.hazardous_waste_reported,
         si.regulatory_fines_disclosed,
         si.supplier_audit_frequency,
+        not si.product_recalls_reported,  # Inverted: no recalls is good
+        not si.worker_incidents_reported,  # Inverted: no incidents is good
     ]
 
     completeness_ratio = (
@@ -608,7 +628,7 @@ def generate_summary(
     """Generate comprehensive 1-page investor summary."""
 
     f_score_normalized = (f_score / 16) * 10
-    s_score_normalized = (s_score / 15) * 10
+    s_score_normalized = (s_score / 17) * 10
     overall = (f_score_normalized + s_score_normalized) / 2
 
     payload = {
@@ -616,7 +636,7 @@ def generate_summary(
         "financial_score_out_of": 16,
         "financial_score_normalized": f_score_normalized,
         "sustainability_score": s_score,
-        "sustainability_score_out_of": 15,
+        "sustainability_score_out_of": 17,
         "sustainability_score_normalized": s_score_normalized,
         "overall_score": overall,
         "financial_indicators": fi.__dict__,
@@ -643,7 +663,7 @@ FORMATTING RULES (IMPORTANT):
 Generate a well-structured report with the following sections:
 
 ## EXECUTIVE OVERVIEW
-2-3 sentences summarizing the company's overall financial health (score: {f_score}/16) and sustainability performance (score: {s_score}/15).
+2-3 sentences summarizing the company's overall financial health (score: {f_score}/16) and sustainability performance (score: {s_score}/17).
 
 ## FINANCIAL ANALYSIS (Score: {f_score}/16, Normalized: {f_norm:.1f}/10)
 Provide 4-6 bullet points analyzing:
@@ -658,12 +678,13 @@ For each bullet point:
   (actual numbers, percentages, or quotes).
 - Follow normal spacing conventions between numbers, units, and years.
 
-## SUSTAINABILITY ANALYSIS (Score: {s_score}/15, Normalized: {s_norm:.1f}/10)
-Provide 4-6 bullet points analyzing:
+## SUSTAINABILITY ANALYSIS (Score: {s_score}/17, Normalized: {s_norm:.1f}/10)
+Provide 5-7 bullet points analyzing:
 - GHG emissions reporting (Scope 1/2/3 coverage and YoY trends)
 - EV transition strategy (production targets, ICE phase-out, battery recycling)
 - Transparency and greenwashing assessment (specificity of claims, third-party verification)
 - Environmental compliance (water, waste, fines, supplier audits)
+- Product recalls and worker/factory incidents: Specifically state whether any product recalls (safety/environmental) or worker/factory incidents related to environmental harm were reported. Quote the evidence field directly.
 
 For each bullet point:
 - Start with a short bold label, e.g. **GHG Emissions:**
@@ -719,7 +740,7 @@ def main():
         """
     Upload financial and/or sustainability reports (PDF format) to get comprehensive analysis with:
     - **Financial scoring** (0-16 points across 8 indicators)
-    - **Sustainability scoring** (0-15 points across 15 automotive-specific indicators)
+    - **Sustainability scoring** (0-17 points across 17 automotive-specific indicators)
     - **Detailed investor summary** with strengths, weaknesses, and risk factors
     """
     )
@@ -857,7 +878,7 @@ def main():
                             llm_json, sustainability_vs
                         )
                         s_score = compute_sustainability_score(si)
-                        s_score_normalized = (s_score / 15) * 10
+                        s_score_normalized = (s_score / 17) * 10
 
                         # Store vector store in session state for chat RAG
                         st.session_state["sustainability_vectorstore"] = (
@@ -940,7 +961,7 @@ def main():
             if si:
                 st.metric(
                     "Sustainability Score",
-                    f"{s_score}/15",
+                    f"{s_score}/17",
                     f"{s_score_normalized:.1f}/10 normalized",
                 )
             else:
@@ -986,7 +1007,7 @@ def main():
                     - **GHG Emissions:** {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4
                     - **Automotive Targets:** {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4
                     - **Transparency:** {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3
-                    - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4
+                    - **Environmental/Compliance:** {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency, not si.product_recalls_reported, not si.worker_incidents_reported])} / 6
                     """
                     )
 
@@ -1147,7 +1168,7 @@ def main():
                     )
                 if si:
                     context_parts.append(
-                        f"Sustainability Analysis (Score {st.session_state.get('sustainability_score')}/15):\n"
+                        f"Sustainability Analysis (Score {st.session_state.get('sustainability_score')}/17):\n"
                         f"{json.dumps(si.__dict__, indent=2)}"
                     )
                 if summary:

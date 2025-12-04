@@ -103,6 +103,10 @@ class SustainabilityIndicators:
     fines_evidence: str
     supplier_audit_frequency: bool
     audit_evidence: str
+    product_recalls_reported: bool
+    product_recalls_evidence: str
+    worker_incidents_reported: bool
+    worker_incidents_evidence: str
 
 
 # --------- RAG HELPERS (vectorstores for financial + sustainability) ---------
@@ -114,7 +118,7 @@ def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     documents = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
+        chunk_size=1000,
         chunk_overlap=200,
     )
     docs = splitter.split_documents(documents)
@@ -143,8 +147,20 @@ def retrieve_context(question: str, vectorstore: FAISS, k: int = 8) -> str:
 
 
 def get_llm() -> ChatOpenAI:
-    """Create a deterministic ChatOpenAI client for extraction & summaries."""
+    """LLM for free-text generation (e.g., investor summary)."""
     return ChatOpenAI(model=MODEL_NAME, temperature=0.0)
+
+
+def get_json_llm() -> ChatOpenAI:
+    """
+    LLM configured to ALWAYS return a JSON object
+    (used for extraction functions to avoid JSONDecodeError).
+    """
+    return ChatOpenAI(
+        model=MODEL_NAME,
+        temperature=0.0,
+        model_kwargs={"response_format": {"type": "json_object"}},
+    )
 
 
 # --------- EXTRACTION FUNCTIONS ---------
@@ -326,7 +342,7 @@ def extract_sustainability_indicators(llm: ChatOpenAI, vs: FAISS) -> Sustainabil
 
     # Query 3: Greenwashing and compliance
     quality_context = retrieve_context(
-        "Sustainability claims, net-zero commitments, water usage, hazardous waste, regulatory fines, supplier audits",
+        "Sustainability claims, net-zero commitments, water usage, hazardous waste, regulatory fines, supplier audits, product recalls, safety incidents, worker safety, plant incidents, environmental harm",
         vs, k=8
     )
 
@@ -379,8 +395,12 @@ Return a STRICT JSON object with exactly these keys and types:
 - fines_evidence: string
 - supplier_audit_frequency: true if supplier audit frequency is mentioned
 - audit_evidence: string
+- product_recalls_reported: true if product recalls related to safety or environmental performance are mentioned
+- product_recalls_evidence: string (brief description of any recalls, or "No product recalls mentioned" if none found)
+- worker_incidents_reported: true if worker/factory/plant incidents related to environmental harm are mentioned
+- worker_incidents_evidence: string (brief description of any incidents, or "No worker incidents mentioned" if none found)
 
-The output MUST be valid JSON with all 24 fields. For example:
+The output MUST be valid JSON with all 28 fields. For example:
 
 {{
   "ghg_scope1_reported": true,
@@ -429,6 +449,10 @@ ONLY output the JSON object, no extra text.
         fines_evidence=data["fines_evidence"],
         supplier_audit_frequency=data["supplier_audit_frequency"],
         audit_evidence=data["audit_evidence"],
+        product_recalls_reported=data["product_recalls_reported"],
+        product_recalls_evidence=data["product_recalls_evidence"],
+        worker_incidents_reported=data["worker_incidents_reported"],
+        worker_incidents_evidence=data["worker_incidents_evidence"],
     )
 
 
@@ -470,9 +494,9 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
     Category 1: GHG Emissions Reporting (4 points)
     Category 2: Automotive Targets & Progress (4 points)
     Category 3: Transparency & Anti-Greenwashing (3 points)
-    Category 4: Environmental & Compliance (4 points)
+    Category 4: Environmental & Compliance (6 points)
 
-    Total: 15 points, normalized to 0-10 scale for reporting
+    Total: 17 points, normalized to 0-10 scale for reporting
     """
     score = 0
 
@@ -504,7 +528,7 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
     if si.avoids_excessive_self_praise:
         score += 1
 
-    # Category 4: Environmental & Compliance (4 points)
+    # Category 4: Environmental & Compliance (6 points)
     if si.water_usage_reported:
         score += 1
     if si.hazardous_waste_reported:
@@ -513,8 +537,14 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
         score += 1
     if si.supplier_audit_frequency:
         score += 1
+    # Inverted scoring: No recalls = +1 point (recalls are BAD)
+    if not si.product_recalls_reported:
+        score += 1
+    # Inverted scoring: No worker incidents = +1 point (incidents are BAD)
+    if not si.worker_incidents_reported:
+        score += 1
 
-    return score  # Out of 15 total
+    return score  # Out of 17 total
 
 
 # --------- SUMMARY GENERATION ---------
@@ -536,8 +566,8 @@ def generate_summary(
     """
 
     # Normalize scores for comparison (both on 0-10 scale)
-    f_score_normalized = (f_score / 16) * 10  # Financial max is now 16
-    s_score_normalized = (s_score / 15) * 10
+    f_score_normalized = (f_score / 16) * 10  # Financial max is 16
+    s_score_normalized = (s_score / 17) * 10  # Sustainability max is 17
     overall = (f_score_normalized + s_score_normalized) / 2
 
     payload = {
@@ -545,7 +575,7 @@ def generate_summary(
         "financial_score_out_of": 16,
         "financial_score_normalized": f_score_normalized,
         "sustainability_score": s_score,
-        "sustainability_score_out_of": 15,
+        "sustainability_score_out_of": 17,
         "sustainability_score_normalized": s_score_normalized,
         "overall_score": overall,
         "financial_indicators": fi.__dict__,
@@ -562,7 +592,7 @@ Here are structured scores and evidence:
 Generate a well-structured report with the following sections:
 
 ## EXECUTIVE OVERVIEW
-2-3 sentences summarizing the company's overall financial health (score: {f_score}/16) and sustainability performance (score: {s_score}/15).
+2-3 sentences summarizing the company's overall financial health (score: {f_score}/16) and sustainability performance (score: {s_score}/17).
 
 ## FINANCIAL ANALYSIS (Score: {f_score}/16, Normalized: {f_norm:.1f}/10)
 Provide 4-6 bullet points analyzing:
@@ -573,12 +603,13 @@ Provide 4-6 bullet points analyzing:
 
 For each bullet point, include supporting snippets from the evidence fields (actual numbers, percentages, or quotes).
 
-## SUSTAINABILITY ANALYSIS (Score: {s_score}/15, Normalized: {s_norm:.1f}/10)
-Provide 4-6 bullet points analyzing:
+## SUSTAINABILITY ANALYSIS (Score: {s_score}/17, Normalized: {s_norm:.1f}/10)
+Provide 5-7 bullet points analyzing:
 - GHG emissions reporting (Scope 1/2/3 coverage and YoY trends)
 - EV transition strategy (production targets, ICE phase-out, battery recycling)
 - Transparency and greenwashing assessment (specificity of claims, third-party verification)
 - Environmental compliance (water, waste, fines, supplier audits)
+- Product recalls and worker/factory incidents: Specifically state whether any product recalls (safety/environmental) or worker/factory incidents related to environmental harm were reported. Quote the evidence field directly.
 
 For each bullet point, include supporting snippets from the evidence fields (actual emissions data, target dates, certifications).
 
@@ -621,7 +652,7 @@ def main():
     f_score_normalized = 0
 
     if FINANCIAL_PDF_PATH:
-        llm = get_llm()
+        llm_json = get_json_llm()
         print("\nBuilding vector store for financial report (targeted retrieval)...")
         financial_vs = build_vectorstore_from_pdf(FINANCIAL_PDF_PATH)
 
@@ -665,7 +696,7 @@ def main():
         )
 
         print("\nExtracting financial indicators from retrieved context...")
-        fi = extract_financial_indicators(llm, financial_context)
+        fi = extract_financial_indicators(llm_json, financial_context)
         f_score = compute_financial_score(fi)
         f_score_normalized = (f_score / 16) * 10
     else:
@@ -678,11 +709,11 @@ def main():
 
     if SUSTAINABILITY_PDF_PATH:
         sustainability_vs = build_vectorstore_from_pdf(SUSTAINABILITY_PDF_PATH)
-        llm = get_llm()
+        llm_json = get_json_llm()
         print("\nExtracting sustainability indicators...")
-        si = extract_sustainability_indicators(llm, sustainability_vs)
+        si = extract_sustainability_indicators(llm_json, sustainability_vs)
         s_score = compute_sustainability_score(si)
-        s_score_normalized = (s_score / 15) * 10
+        s_score_normalized = (s_score / 17) * 10
     else:
         print("\n[Skipping sustainability analysis - no sustainability report provided]")
 
@@ -720,20 +751,20 @@ def main():
         print(f"  - R&D % of Revenue: {fi.rnd_score if fi.rnd_score is not None else 'N/A'} / 2")
         print(f"  - Inventory/DIO: {fi.inventory_score if fi.inventory_score is not None else 'N/A'} / 2")
     if SUSTAINABILITY_PDF_PATH and si:
-        print(f"Sustainability score: {s_score} / 15 (normalized: {s_score_normalized:.1f} / 10)")
+        print(f"Sustainability score: {s_score} / 17 (normalized: {s_score_normalized:.1f} / 10)")
         print(f"  - GHG Emissions: {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4")
         print(f"  - Automotive Targets: {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4")
         print(f"  - Transparency: {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3")
-        print(f"  - Environmental/Compliance: {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency])} / 4")
+        print(f"  - Environmental/Compliance: {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency, not si.product_recalls_reported, not si.worker_incidents_reported])} / 6")
 
     if FINANCIAL_PDF_PATH or SUSTAINABILITY_PDF_PATH:
         print(f"Overall score: {overall:.1f} / 10")
 
     # 8) Generate summary (only if both financial and sustainability data provided)
     if FINANCIAL_PDF_PATH and SUSTAINABILITY_PDF_PATH and fi and si:
-        llm = get_llm()
+        llm_text = get_llm()
         print("\nGenerating investor summary...")
-        summary = generate_summary(llm, f_score, s_score, fi, si)
+        summary = generate_summary(llm_text, f_score, s_score, fi, si)
         print("\n=== INVESTOR SUMMARY ===")
         print(summary)
     elif FINANCIAL_PDF_PATH and fi:
