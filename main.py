@@ -579,7 +579,7 @@ def compute_financial_score(fi: FinancialIndicators) -> int:
 
 def compute_sustainability_score(si: SustainabilityIndicators) -> int:
     """
-    Score out of 20 points across 4 categories for automotive sustainability.
+    Score out of 17 points across 4 categories for automotive sustainability.
 
     Category 1: GHG Emissions Reporting (4 points)
     Category 2: Automotive Targets & Progress (4 points)

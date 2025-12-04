@@ -3,7 +3,7 @@
 ## Overview
 Sustainability indicators use a **binary scoring system (0 or 1 point)** for each metric, specifically designed for automotive manufacturers with focus on EV transition and greenwashing detection.
 
-**Maximum Score: 15 points** (across 4 categories)
+**Maximum Score: 17 points** (across 4 categories)
 
 ---
 
@@ -184,7 +184,7 @@ These metrics assess the quality and credibility of sustainability claims.
 
 ---
 
-### Category 4: Environmental & Compliance Metrics (4 points)
+### Category 4: Environmental & Compliance Metrics (6 points)
 
 Operational environmental performance beyond GHG emissions.
 
@@ -246,30 +246,66 @@ Operational environmental performance beyond GHG emissions.
 
 ---
 
+#### 4.5 Product Recalls (1 point)
+**Scoring:**
+- **1 point**: NO product recalls occurred, OR no recalls are mentioned (absence of recalls is positive)
+- **0 points**: Product recalls were reported
+
+**What it measures:** Product quality and safety track record
+
+**Evidence required:**
+- Explicit statement like "No product recalls occurred during the reporting period"
+- OR absence of any recall mentions in the report (silence indicates clean record)
+
+**Why it matters:** Product recalls indicate quality control issues and can signal environmental compliance problems (e.g., emissions-related recalls)
+
+**Note:** This is inverse scoring - companies get the point for NOT having recalls
+
+---
+
+#### 4.6 Worker/Plant Incidents (1 point)
+**Scoring:**
+- **1 point**: NO worker/factory/plant incidents related to environmental harm occurred, OR no incidents are mentioned (absence of incidents is positive)
+- **0 points**: Environmental incidents at facilities were reported
+
+**What it measures:** Workplace safety and environmental compliance at facilities
+
+**Evidence required:**
+- Explicit statement like "No environmental incidents at manufacturing facilities"
+- OR absence of any incident mentions in the report (silence indicates clean record)
+
+**Why it matters:** Environmental incidents (spills, releases, violations) indicate operational compliance issues
+
+**Note:** This is inverse scoring - companies get the point for NOT having incidents
+
+---
+
 ## Interpretation Guide
 
-### Excellent Sustainability Performance (12-15 points)
+### Excellent Sustainability Performance (14-17 points)
 - Full GHG disclosure with YoY trends
 - Clear EV transition plan with dates
 - Battery recycling and supply chain programs
 - Specific, evidence-backed claims
 - Comprehensive environmental disclosures
+- Clean compliance record (no recalls or incidents)
 
 **Example:** Tesla-like disclosure with full emissions data, third-party verification, specific targets
 
 ---
 
-### Good Sustainability Performance (8-11 points)
+### Good Sustainability Performance (10-13 points)
 - Scope 1/2/3 reported, may lack YoY trends
 - Some automotive targets (EVs or recycling)
 - Claims are mostly specific
 - Partial environmental disclosures
+- Good compliance track record
 
 **Example:** Traditional automaker in transition with clear EV targets but incomplete environmental data
 
 ---
 
-### Developing Sustainability Performance (4-7 points)
+### Developing Sustainability Performance (6-9 points)
 - Incomplete GHG reporting (missing Scope 3 or YoY)
 - Vague transition commitments
 - Some greenwashing indicators
@@ -279,7 +315,7 @@ Operational environmental performance beyond GHG emissions.
 
 ---
 
-### Poor Sustainability Performance (0-3 points)
+### Poor Sustainability Performance (0-5 points)
 - Little to no GHG data
 - No clear EV transition plan
 - Heavy greenwashing (vague, promotional claims)
