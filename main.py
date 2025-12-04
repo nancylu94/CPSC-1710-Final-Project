@@ -15,14 +15,36 @@ from langchain_core.prompts import ChatPromptTemplate
 # --------- CONFIG: PDF paths and model name ---------
 
 # Set to None to skip analysis
-FINANCIAL_PDF_PATH = "C:/Users/nancy/OneDrive - Yale University/Documents/1. School/4. Yale MAM/3. Academics/MGT 695/CPSC-1710-Final-Project/data/AAPL_2024_Annual_Report_Condensed.pdf"
-SUSTAINABILITY_PDF_PATH = "C:/Users/nancy/OneDrive - Yale University/Documents/1. School/4. Yale MAM/3. Academics/MGT 695/CPSC-1710-Final-Project/data/RIVN_2024_Environmental_Metrics_Report.pdf"
+# Use relative paths for portability
+FINANCIAL_PDF_PATH = os.path.join("data", "AAPL_2024_Annual_Report_Condensed.pdf")
+SUSTAINABILITY_PDF_PATH = os.path.join("data", "RIVN_2024_Environmental_Metrics_Report.pdf")
 
 MODEL_NAME = "gpt-4o-mini"  # option to switch to gpt-4o (more expensive)
 
-if "OPENAI_API_KEY" not in os.environ:
+# Scoring constants
+FINANCIAL_MAX_SCORE = 16  # 8 indicators × 2 points each
+SUSTAINABILITY_MAX_SCORE = 17  # 4+4+3+6 points across 4 categories
+NORMALIZED_SCALE = 10  # Normalize all scores to 0-10 scale
+
+# RAG/Chunking parameters
+CHUNK_SIZE = 1000  # Balance between context window and specificity (~250 tokens)
+CHUNK_OVERLAP = 200  # Ensures sentences aren't split awkwardly
+DEFAULT_RETRIEVAL_K = 8  # Default number of chunks to retrieve
+MDNA_RETRIEVAL_K = 6  # Fewer chunks for MD&A section
+
+# LLM parameters
+EXTRACTION_TEMPERATURE = 0.0  # Deterministic for extraction
+SUMMARY_TEMPERATURE = 0.0  # Deterministic for summaries
+
+# Validate API key
+api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+if not api_key:
     raise RuntimeError(
-        "OPENAI_API_KEY not found. Make sure you created a .env file with OPENAI_API_KEY=your_key"
+        "OPENAI_API_KEY not found or empty. Make sure you created a .env file with OPENAI_API_KEY=your_key"
+    )
+if not api_key.startswith("sk-"):
+    raise RuntimeError(
+        "OPENAI_API_KEY appears invalid (should start with 'sk-'). Please check your API key."
     )
 
 # --------- DATA CLASSES ---------
@@ -103,9 +125,9 @@ class SustainabilityIndicators:
     fines_evidence: str
     supplier_audit_frequency: bool
     audit_evidence: str
-    product_recalls_reported: bool
+    no_product_recalls: bool
     product_recalls_evidence: str
-    worker_incidents_reported: bool
+    no_worker_incidents: bool
     worker_incidents_evidence: str
 
 
@@ -118,8 +140,8 @@ def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     documents = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
     )
     docs = splitter.split_documents(documents)
 
@@ -134,7 +156,7 @@ def build_vectorstore_from_pdf(pdf_path: str) -> FAISS:
     return vs
 
 
-def retrieve_context(question: str, vectorstore: FAISS, k: int = 8) -> str:
+def retrieve_context(question: str, vectorstore: FAISS, k: int = DEFAULT_RETRIEVAL_K) -> str:
     """Retrieve top-k chunks for a question and join them into one context string."""
     retriever = vectorstore.as_retriever(search_kwargs={"k": k})
     docs = retriever.invoke(question)
@@ -148,7 +170,7 @@ def retrieve_context(question: str, vectorstore: FAISS, k: int = 8) -> str:
 
 def get_llm() -> ChatOpenAI:
     """LLM for free-text generation (e.g., investor summary)."""
-    return ChatOpenAI(model=MODEL_NAME, temperature=0.0)
+    return ChatOpenAI(model=MODEL_NAME, temperature=SUMMARY_TEMPERATURE)
 
 
 def get_json_llm() -> ChatOpenAI:
@@ -158,7 +180,7 @@ def get_json_llm() -> ChatOpenAI:
     """
     return ChatOpenAI(
         model=MODEL_NAME,
-        temperature=0.0,
+        temperature=EXTRACTION_TEMPERATURE,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
 
@@ -303,7 +325,32 @@ ONLY output the JSON object, no extra text.
 
     chain = prompt | llm
     resp = chain.invoke({"context": context})
-    data: Dict[str, Any] = json.loads(resp.content)
+
+    try:
+        data: Dict[str, Any] = json.loads(resp.content)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: LLM returned invalid JSON for financial indicators")
+        print(f"Response preview: {resp.content[:500]}")
+        print(f"JSONDecodeError: {e}")
+        # Return default indicators with all None values
+        return FinancialIndicators(
+            revenue_growth_score=None,
+            revenue_growth_evidence="Error: Could not parse LLM response",
+            gross_margin_score=None,
+            gross_margin_evidence="Error: Could not parse LLM response",
+            operating_margin_score=None,
+            operating_margin_evidence="Error: Could not parse LLM response",
+            ebitda_margin_score=None,
+            ebitda_margin_evidence="Error: Could not parse LLM response",
+            fcf_score=None,
+            fcf_evidence="Error: Could not parse LLM response",
+            capex_score=None,
+            capex_evidence="Error: Could not parse LLM response",
+            rnd_score=None,
+            rnd_evidence="Error: Could not parse LLM response",
+            inventory_score=None,
+            inventory_evidence="Error: Could not parse LLM response",
+        )
 
     return FinancialIndicators(
         revenue_growth_score=data["revenue_growth_score"],
@@ -395,10 +442,10 @@ Return a STRICT JSON object with exactly these keys and types:
 - fines_evidence: string
 - supplier_audit_frequency: true if supplier audit frequency is mentioned
 - audit_evidence: string
-- product_recalls_reported: true if product recalls related to safety or environmental performance are mentioned
-- product_recalls_evidence: string (brief description of any recalls, or "No product recalls mentioned" if none found)
-- worker_incidents_reported: true if worker/factory/plant incidents related to environmental harm are mentioned
-- worker_incidents_evidence: string (brief description of any incidents, or "No worker incidents mentioned" if none found)
+- no_product_recalls: true if the report explicitly states that NO product recalls occurred, OR if no recalls are mentioned at all (absence of recalls is positive)
+- product_recalls_evidence: string (quote text confirming no recalls, or state "No recalls mentioned" if absent from report)
+- no_worker_incidents: true if the report explicitly states that NO worker/factory/plant incidents related to environmental harm occurred, OR if no incidents are mentioned at all (absence of incidents is positive)
+- worker_incidents_evidence: string (quote text confirming no incidents, or state "No incidents mentioned" if absent from report)
 
 The output MUST be valid JSON with all 28 fields. For example:
 
@@ -416,7 +463,50 @@ ONLY output the JSON object, no extra text.
 
     chain = prompt | llm
     resp = chain.invoke({"context": combined_context})
-    data: Dict[str, Any] = json.loads(resp.content)
+
+    try:
+        data: Dict[str, Any] = json.loads(resp.content)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: LLM returned invalid JSON for sustainability indicators")
+        print(f"Response preview: {resp.content[:500]}")
+        print(f"JSONDecodeError: {e}")
+        # Return default indicators with all False values
+        return SustainabilityIndicators(
+            ghg_scope1_reported=False,
+            ghg_scope1_evidence="Error: Could not parse LLM response",
+            ghg_scope2_reported=False,
+            ghg_scope2_evidence="Error: Could not parse LLM response",
+            ghg_scope3_reported=False,
+            ghg_scope3_evidence="Error: Could not parse LLM response",
+            ghg_yoy_change_reported=False,
+            ghg_yoy_evidence="Error: Could not parse LLM response",
+            ev_production_targets=False,
+            ev_targets_evidence="Error: Could not parse LLM response",
+            battery_recycling_reported=False,
+            battery_recycling_evidence="Error: Could not parse LLM response",
+            ice_phaseout_date_specified=False,
+            ice_phaseout_evidence="Error: Could not parse LLM response",
+            supply_chain_traceability=False,
+            supply_chain_evidence="Error: Could not parse LLM response",
+            claims_have_specificity=False,
+            specificity_evidence="Error: Could not parse LLM response",
+            claims_have_supporting_evidence=False,
+            supporting_evidence="Error: Could not parse LLM response",
+            avoids_excessive_self_praise=False,
+            self_praise_evidence="Error: Could not parse LLM response",
+            water_usage_reported=False,
+            water_usage_evidence="Error: Could not parse LLM response",
+            hazardous_waste_reported=False,
+            hazardous_waste_evidence="Error: Could not parse LLM response",
+            regulatory_fines_disclosed=False,
+            fines_evidence="Error: Could not parse LLM response",
+            supplier_audit_frequency=False,
+            audit_evidence="Error: Could not parse LLM response",
+            no_product_recalls=False,
+            product_recalls_evidence="Error: Could not parse LLM response",
+            no_worker_incidents=False,
+            worker_incidents_evidence="Error: Could not parse LLM response",
+        )
 
     return SustainabilityIndicators(
         ghg_scope1_reported=data["ghg_scope1_reported"],
@@ -449,9 +539,9 @@ ONLY output the JSON object, no extra text.
         fines_evidence=data["fines_evidence"],
         supplier_audit_frequency=data["supplier_audit_frequency"],
         audit_evidence=data["audit_evidence"],
-        product_recalls_reported=data["product_recalls_reported"],
+        no_product_recalls=data["no_product_recalls"],
         product_recalls_evidence=data["product_recalls_evidence"],
-        worker_incidents_reported=data["worker_incidents_reported"],
+        no_worker_incidents=data["no_worker_incidents"],
         worker_incidents_evidence=data["worker_incidents_evidence"],
     )
 
@@ -537,11 +627,11 @@ def compute_sustainability_score(si: SustainabilityIndicators) -> int:
         score += 1
     if si.supplier_audit_frequency:
         score += 1
-    # Inverted scoring: No recalls = +1 point (recalls are BAD)
-    if not si.product_recalls_reported:
+    # Positive scoring: No recalls = +1 point
+    if si.no_product_recalls:
         score += 1
-    # Inverted scoring: No worker incidents = +1 point (incidents are BAD)
-    if not si.worker_incidents_reported:
+    # Positive scoring: No worker incidents = +1 point
+    if si.no_worker_incidents:
         score += 1
 
     return score  # Out of 17 total
@@ -645,7 +735,7 @@ Keep the entire report under 600 words. Use clear, professional language. Quote 
 
 # --------- MAIN ---------
 
-def main():
+def main() -> None:
     # 1) Financial analysis (Pattern A: targeted retrieval + non-RAG scoring)
     fi = None
     f_score = 0
@@ -679,7 +769,7 @@ def main():
         mdna_context = retrieve_context(
             "management discussion and analysis revenue growth year over year margin trends operating margin ebitda",
             financial_vs,
-            k=6,
+            k=MDNA_RETRIEVAL_K,
         )
 
         financial_context = "\n\n".join(
@@ -698,7 +788,7 @@ def main():
         print("\nExtracting financial indicators from retrieved context...")
         fi = extract_financial_indicators(llm_json, financial_context)
         f_score = compute_financial_score(fi)
-        f_score_normalized = (f_score / 16) * 10
+        f_score_normalized = (f_score / FINANCIAL_MAX_SCORE) * NORMALIZED_SCALE
     else:
         print("\n[Skipping financial analysis - no financial report provided]")
 
@@ -713,7 +803,7 @@ def main():
         print("\nExtracting sustainability indicators...")
         si = extract_sustainability_indicators(llm_json, sustainability_vs)
         s_score = compute_sustainability_score(si)
-        s_score_normalized = (s_score / 17) * 10
+        s_score_normalized = (s_score / SUSTAINABILITY_MAX_SCORE) * NORMALIZED_SCALE
     else:
         print("\n[Skipping sustainability analysis - no sustainability report provided]")
 
@@ -755,7 +845,7 @@ def main():
         print(f"  - GHG Emissions: {sum([si.ghg_scope1_reported, si.ghg_scope2_reported, si.ghg_scope3_reported, si.ghg_yoy_change_reported])} / 4")
         print(f"  - Automotive Targets: {sum([si.ev_production_targets, si.battery_recycling_reported, si.ice_phaseout_date_specified, si.supply_chain_traceability])} / 4")
         print(f"  - Transparency: {sum([si.claims_have_specificity, si.claims_have_supporting_evidence, si.avoids_excessive_self_praise])} / 3")
-        print(f"  - Environmental/Compliance: {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency, not si.product_recalls_reported, not si.worker_incidents_reported])} / 6")
+        print(f"  - Environmental/Compliance: {sum([si.water_usage_reported, si.hazardous_waste_reported, si.regulatory_fines_disclosed, si.supplier_audit_frequency, si.no_product_recalls, si.no_worker_incidents])} / 6")
 
     if FINANCIAL_PDF_PATH or SUSTAINABILITY_PDF_PATH:
         print(f"Overall score: {overall:.1f} / 10")

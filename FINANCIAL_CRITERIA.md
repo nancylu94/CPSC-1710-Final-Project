@@ -1,7 +1,7 @@
 # Financial Indicators - Sophisticated Scoring System
 
 ## Overview
-Financial indicators now use a **0-2 point scoring system** for each metric, allowing for nuanced assessment beyond simple yes/no.
+Financial indicators use a **0-2 point scoring system** for each metric, allowing for nuanced assessment beyond simple yes/no.
 
 **Maximum Score: 16 points** (8 indicators × 2 points each)
 

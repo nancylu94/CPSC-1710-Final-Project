@@ -1,6 +1,38 @@
 # CPSC-1710-Final-Project
 Financial/Sustainability Analysis Tool for Introduction to AI Applications
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Scoring Structure](#scoring-structure)
+  - [Financial Indicators (16 points)](#financial-indicators-16-points--normalized-to-10)
+  - [Sustainability Indicators (17 points)](#sustainability-indicators-16-points--normalized-to-10)
+- [How the Tool Works](#how-the-tool-works)
+- [Output Format](#output-format)
+- [Use Cases](#use-cases)
+- [Running the Code](#running-the-code)
+  - [Option 1: Web Interface (Recommended)](#option-1-web-interface-recommended)
+  - [Option 2: Command Line Interface](#option-2-command-line-interface)
+- [Reproducing Results](#reproducing-results)
+  - [Sample Data Included](#sample-data-included)
+  - [Quick Start: Reproduce Sample Results](#quick-start-reproduce-sample-results)
+  - [Expected Results for Sample Data](#expected-results-for-sample-data)
+  - [Reproducing with Your Own Data](#reproducing-with-your-own-data)
+  - [Validating Results](#validating-results)
+  - [Batch Processing Multiple Companies](#batch-processing-multiple-companies)
+  - [Cost Estimation](#cost-estimation)
+- [Installation & Setup Guide](#installation--setup-guide)
+  - [Prerequisites](#prerequisites)
+  - [Step 1: Clone or Download the Repository](#step-1-clone-or-download-the-repository)
+  - [Step 2: Create a Virtual Environment](#step-2-create-a-virtual-environment-recommended)
+  - [Step 3: Install Dependencies](#step-3-install-dependencies)
+  - [Step 4: Configure Environment Variables](#step-4-configure-environment-variables)
+  - [Step 5: Prepare Sample Data](#step-5-prepare-sample-data-for-cli-option)
+  - [Step 6: Verify Installation](#step-6-verify-installation)
+  - [Troubleshooting Common Issues](#troubleshooting-common-issues)
+
+---
+
 # Automotive-Specific Financial & Sustainability Criteria
 
 ## Overview
@@ -208,29 +240,68 @@ Tailored to automotive industry with focus on:
 
 ---
 
-## Running the Tool
+## Running the Code
 
 ### Option 1: Web Interface (Recommended)
 
-Run the interactive web application:
+The web interface provides the most user-friendly experience with interactive visualizations.
 
+**1. Start the application:**
 ```bash
 streamlit run app.py
 ```
 
-This will open a web interface in your browser where you can:
-- Upload financial and/or sustainability reports via drag-and-drop
-- View interactive scores and breakdowns (Financial: 0-16 points, Sustainability: 0-16 points)
-- See a visual disclosure quality matrix showing greenwashing risk
-- Download the investor summary as a text file
-- **Ask questions via chat assistant** - Right sidebar chat with RAG-enabled Q&A
-- See detailed raw indicators for debugging
+**2. What happens next:**
+- Streamlit will start a local web server (usually on `http://localhost:8501`)
+- Your default browser will automatically open
+- You'll see the application interface
+
+**3. Using the application:**
+
+a) **Enter API Key** (in the app interface):
+   - Paste your OpenAI API key in the password field
+   - Click outside the field or press Enter
+
+b) **Upload Reports**:
+   - Drag and drop PDF files or click "Browse files"
+   - Upload financial report (annual report, 10-K, etc.)
+   - Upload sustainability report (ESG report, sustainability report, etc.)
+   - You can upload one or both reports
+
+c) **Analyze**:
+   - Click "🔍 Analyze Reports" button
+   - Processing typically takes 2-3 minutes
+   - Progress indicators show: "📊 Analyzing financial report..." and "🌱 Analyzing sustainability report..."
+
+d) **Review Results**:
+   - **Scores section**: See financial score (0-16), sustainability score (0-17), and overall score (0-10)
+   - **Breakdown section**: Detailed category scores with evidence
+   - **Disclosure Quality Matrix**: Visual risk assessment (green = low risk, red = high risk)
+   - **Investor Summary**: 1-page comprehensive analysis
+   - **Raw Indicators**: Debug view with all extracted data
+
+e) **Chat with Assistant** (right sidebar):
+   - Ask questions about the analysis
+   - Query the original documents
+   - Get explanations for specific metrics
+
+**Features:**
+- ✅ No file paths to edit - upload directly
+- ✅ Interactive visualizations
+- ✅ Download investor summary as text file
+- ✅ RAG-enabled chat assistant
+- ✅ Session persistence (results stay until you refresh)
 
 **Requirements:**
-- OpenAI API key in `.env` file
+- OpenAI API key (entered in the app)
 - Internet connection for OpenAI API calls
+- Modern web browser (Chrome, Firefox, Safari, Edge)
 
-**Processing time:** ~2-3 minutes depending on document size and API response time.
+**Processing time:**
+- Financial analysis: ~60-90 seconds
+- Sustainability analysis: ~60-90 seconds
+- Summary generation: ~30 seconds
+- **Total: 2-3 minutes** (varies based on PDF size and API response time)
 
 #### AI Chat Assistant (RAG-Enabled)
 
@@ -267,30 +338,387 @@ After analysis is complete, the **chat assistant** automatically appears in the 
 
 ### Option 2: Command Line Interface
 
-Run the traditional CLI version:
+The CLI version is useful for batch processing or scripting.
 
+**1. Prepare your data:**
+```bash
+mkdir data
+# Place your PDF files in the data/ folder
+```
+
+**2. Edit file paths in `main.py`** (lines 19-20):
+
+The default paths are:
+```python
+FINANCIAL_PDF_PATH = os.path.join("data", "AAPL_2024_Annual_Report_Condensed.pdf")
+SUSTAINABILITY_PDF_PATH = os.path.join("data", "RIVN_2024_Environmental_Metrics_Report.pdf")
+```
+
+Change these to your actual filenames:
+```python
+FINANCIAL_PDF_PATH = os.path.join("data", "your_financial_report.pdf")
+SUSTAINABILITY_PDF_PATH = os.path.join("data", "your_sustainability_report.pdf")
+```
+
+**To skip an analysis**, set the path to `None`:
+```python
+FINANCIAL_PDF_PATH = None  # Skip financial analysis
+SUSTAINABILITY_PDF_PATH = os.path.join("data", "sustainability_report.pdf")
+```
+
+**3. Run the script:**
 ```bash
 python main.py
 ```
 
-Edit the paths in `main.py` to point to your PDF files:
-```python
-FINANCIAL_PDF_PATH = "path/to/financial_report.pdf"
-SUSTAINABILITY_PDF_PATH = "path/to/sustainability_report.pdf"
+**4. What happens:**
+- Console output shows progress: "Loading PDF...", "Building embeddings...", "Extracting indicators..."
+- Results print to terminal with scores, breakdowns, and investor summary
+- Processing time: 2-3 minutes
+
+**Output format:**
+```
+Building vector store for financial report...
+Split into 147 chunks. Building embeddings...
+Vector store built.
+
+Extracting financial indicators...
+Financial score: 12 / 16 (normalized: 7.5 / 10)
+  - Revenue Growth: 2 / 2
+  - Gross Margin: 1 / 2
+  ...
+
+Sustainability score: 14 / 17 (normalized: 8.2 / 10)
+  - GHG Emissions: 4 / 4
+  ...
+
+Overall score: 7.8 / 10
+
+=== INVESTOR SUMMARY ===
+[Full 1-page summary printed here]
 ```
 
-Set either path to `None` to skip that analysis.
+**Advantages of CLI:**
+- ✅ Faster for repeat analyses (no UI overhead)
+- ✅ Can be scripted for batch processing
+- ✅ Better for debugging (verbose console output)
+
+**Disadvantages:**
+- ❌ Must edit code to change files
+- ❌ No interactive visualizations
+- ❌ No chat assistant
 
 ---
 
-## Installation
+## Reproducing Results
 
-1. Install dependencies:
+This section provides step-by-step instructions to reproduce the analysis results for the sample companies included in the project.
+
+### Sample Data Included
+
+The `data/` folder contains two sample PDF reports:
+
+1. **Apple Inc. (AAPL) - 2024 Annual Report (Condensed)**
+   - Financial report with income statement, balance sheet, and cash flow
+   - Used for financial indicator extraction
+
+2. **Rivian Automotive (RIVN) - 2024 Environmental Metrics Report**
+   - Sustainability report with GHG emissions, EV targets, and environmental metrics
+   - Used for sustainability indicator extraction
+
+### Quick Start: Reproduce Sample Results
+
+**Using Web Interface (Easiest):**
+
+1. Ensure setup is complete (see Installation & Setup Guide below)
+2. Run: `streamlit run app.py`
+3. Enter your OpenAI API key in the interface
+4. Upload `data/AAPL_2024_Annual_Report_Condensed.pdf` as financial report
+5. Upload `data/RIVN_2024_Environmental_Metrics_Report.pdf` as sustainability report
+6. Click "🔍 Analyze Reports"
+7. Wait 2-3 minutes for processing
+
+**Using CLI:**
+
+1. Ensure setup is complete (see Installation & Setup Guide below)
+2. Verify paths in `main.py` (lines 19-20) point to the sample files:
+   ```python
+   FINANCIAL_PDF_PATH = os.path.join("data", "AAPL_2024_Annual_Report_Condensed.pdf")
+   SUSTAINABILITY_PDF_PATH = os.path.join("data", "RIVN_2024_Environmental_Metrics_Report.pdf")
+   ```
+3. Run: `python main.py`
+4. Results will print to console
+
+### Expected Results for Sample Data
+
+**Apple (AAPL) Financial Score:**
+- Expected range: 10-14 / 16 points
+- Strong indicators: Revenue growth, R&D investment, inventory management
+- Weaker indicators: Operating margins (depending on year)
+
+**Rivian (RIVN) Sustainability Score:**
+- Expected range: 12-16 / 17 points
+- Strong indicators: EV targets (100% EV), GHG reporting, supply chain traceability
+- Weaker indicators: May vary based on report completeness
+
+**Overall Combined Score:**
+- Expected range: 7.0-9.0 / 10
+
+**Note:** Exact scores may vary slightly due to:
+- OpenAI API model variations (temperature=0.0 reduces but doesn't eliminate variance)
+- PDF parsing differences
+- RAG retrieval variations (vector similarity is probabilistic)
+
+### Reproducing with Your Own Data
+
+**Step 1: Obtain PDF Reports**
+
+For any automotive company, you need:
+
+1. **Financial Report** (one of):
+   - Annual report (10-K for US companies)
+   - Quarterly report (10-Q)
+   - Investor presentation with financial statements
+   - **Must include**: Income statement, balance sheet, cash flow statement, MD&A
+
+2. **Sustainability Report** (one of):
+   - ESG report
+   - Sustainability report
+   - Environmental report
+   - Corporate social responsibility (CSR) report
+   - **Should include**: GHG emissions, environmental targets, compliance metrics
+
+**Step 2: Prepare Files**
+
+- Save PDFs to `data/` folder
+- Use clear, descriptive filenames (e.g., `TSLA_2024_10K.pdf`, `TSLA_2024_ESG_Report.pdf`)
+- Ensure PDFs are text-based (not scanned images)
+
+**Step 3: Run Analysis**
+
+Follow either "Option 1: Web Interface" or "Option 2: CLI" instructions above.
+
+**Step 4: Interpret Results**
+
+- **Financial Score (0-16)**: Higher is better; measures financial health
+  - 13-16: Excellent
+  - 9-12: Good
+  - 5-8: Concerning
+  - 0-4: Poor
+
+- **Sustainability Score (0-17)**: Higher is better; measures disclosure quality
+  - 14-17: Comprehensive disclosure
+  - 10-13: Good disclosure with gaps
+  - 6-9: Limited disclosure
+  - 0-5: Minimal disclosure
+
+- **Overall Score (0-10)**: Normalized average
+  - 8.0-10.0: Strong performer
+  - 6.0-7.9: Average performer
+  - 4.0-5.9: Weak performer
+  - 0.0-3.9: Very weak performer
+
+### Validating Results
+
+**Cross-Check Financial Indicators:**
+
+Compare extracted metrics with actual reported figures:
+
+1. **Revenue Growth**: Check MD&A section or investor presentation
+2. **Margins**: Calculate manually from financial statements
+   - Gross Margin = (Revenue - COGS) / Revenue
+   - Operating Margin = Operating Income / Revenue
+   - EBITDA Margin = EBITDA / Revenue
+3. **CapEx %**: Capital expenditures / Revenue (from cash flow statement)
+4. **R&D %**: R&D expense / Revenue (from income statement)
+5. **DIO**: (Average Inventory / COGS) × 365 days
+
+**Cross-Check Sustainability Indicators:**
+
+Review sustainability report for:
+
+1. **GHG Emissions**: Look for explicit Scope 1/2/3 figures (in tonnes CO2e)
+2. **EV Targets**: Search for "EV production", "electrification", "battery electric vehicles"
+3. **ICE Phase-out**: Look for "internal combustion", "gasoline", "diesel" phase-out dates
+4. **Compliance**: Check for disclosures of fines, violations, recalls, incidents
+
+**If Results Seem Incorrect:**
+
+1. **Check PDF Quality**: Ensure text is extractable (try copying text from PDF)
+2. **Review Evidence Fields**: Look at the raw indicators debug view
+3. **Check Report Format**: Some reports may have non-standard layouts
+4. **Verify Context Retrieval**: RAG may miss relevant sections if they use unusual terminology
+
+### Batch Processing Multiple Companies
+
+To analyze multiple companies efficiently:
+
+**Method 1: CLI Loop (Python Script)**
+```python
+companies = [
+    ("TSLA", "data/TSLA_2024_10K.pdf", "data/TSLA_2024_ESG.pdf"),
+    ("GM", "data/GM_2024_10K.pdf", "data/GM_2024_ESG.pdf"),
+    # Add more...
+]
+
+for name, financial, sustainability in companies:
+    # Modify main.py paths programmatically
+    # Run analysis
+    # Save results to CSV/JSON
+```
+
+**Method 2: Web Interface (Manual)**
+- Process each company one at a time
+- Download investor summary for each
+- Compile results in spreadsheet
+
+### Cost Estimation
+
+**OpenAI API Costs** (as of 2024, using gpt-4o-mini):
+
+Per analysis:
+- Embedding creation: ~$0.05-0.10 (depends on PDF size)
+- LLM extraction calls: ~$0.10-0.20 (3 calls total)
+- Summary generation: ~$0.05-0.10
+- **Total per company: ~$0.20-0.40**
+
+For 10 companies: ~$2-4
+For 100 companies: ~$20-40
+
+**Note**: Costs vary based on PDF length and model pricing. Check [OpenAI Pricing](https://openai.com/pricing) for current rates.
+
+---
+
+## Installation & Setup Guide
+
+### Prerequisites
+
+Before running the application, ensure you have:
+
+- **Python 3.10 or higher** installed ([Download Python](https://www.python.org/downloads/))
+- **OpenAI API key** ([Get your API key](https://platform.openai.com/api-keys))
+- **Git** (optional, for cloning the repository)
+- **Terminal/Command Prompt** access
+
+### Step 1: Clone or Download the Repository
+
+**Option A: Using Git**
+```bash
+git clone <repository-url>
+cd CPSC-1710-Final-Project
+```
+
+**Option B: Download ZIP**
+- Download the ZIP file from the repository
+- Extract to a folder of your choice
+- Open terminal/command prompt and navigate to the extracted folder
+
+### Step 2: Create a Virtual Environment (Recommended)
+
+Creating a virtual environment keeps dependencies isolated:
+
+**On Windows:**
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+**On macOS/Linux:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+You should see `(venv)` at the beginning of your command prompt when activated.
+
+### Step 3: Install Dependencies
+
+With the virtual environment activated, install all required packages:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Create a `.env` file with your OpenAI API key:
+**What gets installed:**
+- `streamlit` - Web interface framework
+- `langchain` and `langchain-community` - LLM orchestration
+- `langchain-openai` - OpenAI integration
+- `openai` - OpenAI API client
+- `python-dotenv` - Environment variable management
+- `pypdf` - PDF parsing
+- `faiss-cpu` - Vector similarity search
+- `tiktoken` - Token counting for OpenAI models
+
+**Installation time:** ~2-3 minutes depending on internet speed.
+
+### Step 4: Configure Environment Variables
+
+Create a `.env` file in the project root directory:
+
+**On Windows (Command Prompt):**
+```bash
+echo OPENAI_API_KEY=your_api_key_here > .env
 ```
-OPENAI_API_KEY=your_api_key_here
+
+**On macOS/Linux or Windows (PowerShell):**
+```bash
+echo "OPENAI_API_KEY=your_api_key_here" > .env
 ```
+
+**Or manually create the file:**
+1. Create a new file named `.env` (no extension) in the project root
+2. Add this line: `OPENAI_API_KEY=your_api_key_here`
+3. Replace `your_api_key_here` with your actual OpenAI API key
+
+**⚠️ Important:**
+- Your API key should start with `sk-`
+- Never commit the `.env` file to version control (it's in `.gitignore`)
+- Keep your API key secure and private
+
+### Step 5: Prepare Sample Data (For CLI Option)
+
+If using the command-line interface (`main.py`), create a `data/` folder and add your PDF files:
+
+```bash
+mkdir data
+```
+
+Place your PDF files in this folder:
+- `data/AAPL_2024_Annual_Report_Condensed.pdf` (or your financial report)
+- `data/RIVN_2024_Environmental_Metrics_Report.pdf` (or your sustainability report)
+
+**For the web interface (`app.py`)**, you can upload files directly through the browser interface.
+
+### Step 6: Verify Installation
+
+Test that everything is installed correctly:
+
+```bash
+python -c "import streamlit; import langchain; import openai; print('All dependencies installed successfully!')"
+```
+
+If you see "All dependencies installed successfully!", you're ready to go!
+
+### Troubleshooting Common Issues
+
+**Issue: `pip: command not found`**
+- Try `pip3` instead of `pip`
+- Or use `python -m pip install -r requirements.txt`
+
+**Issue: `ModuleNotFoundError` after installation**
+- Make sure your virtual environment is activated (you should see `(venv)` in terminal)
+- Try reinstalling: `pip install --force-reinstall -r requirements.txt`
+
+**Issue: `OPENAI_API_KEY not found` error**
+- Verify `.env` file exists in project root directory
+- Check that API key is on a line like: `OPENAI_API_KEY=sk-...`
+- Ensure no spaces around the `=` sign
+- Restart the application after creating `.env`
+
+**Issue: SSL Certificate errors**
+- On macOS: Run `/Applications/Python\ 3.x/Install\ Certificates.command`
+- On Windows: Update pip: `python -m pip install --upgrade pip`
+
+**Issue: FAISS installation fails**
+- Try: `pip install faiss-cpu --no-cache-dir`
+- On M1/M2 Mac: `pip install faiss-cpu --no-binary :all:`
